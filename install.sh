@@ -18,6 +18,7 @@ NOPATH=0
 SKIP_PURGE=0
 ROUTER_BASE=""
 ROUTER_KEY=""
+MIRROR=""
 
 usage() {
   cat <<'EOF'
@@ -35,6 +36,8 @@ usage: install.sh [options]
   --skip-purge              install runtime only
   --router-base URL         DSH_ROUTER_BASE
   --router-key KEY          DS9700_API_KEY
+  --mirror URL              prepend a download accelerator for release assets
+                            e.g. --mirror https://ghfast.top
   -h, --help
 EOF
 }
@@ -54,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --skip-purge) SKIP_PURGE=1; shift;;
     --router-base) ROUTER_BASE="$2"; shift 2;;
     --router-key) ROUTER_KEY="$2"; shift 2;;
+    --mirror) MIRROR="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "unknown option: $1" >&2; usage; exit 2;;
   esac
@@ -146,6 +150,7 @@ get_asset() { # name [optional]
     die "offline mode: required asset missing -> $name"
   fi
   local url="https://github.com/$REPO/releases/download/$TAG/$name"
+  if [[ -n "$MIRROR" ]]; then url="${MIRROR%/}/$url"; fi
   info "downloading $name ..."
   log "download $url"
   if [[ $DRY -eq 1 ]]; then return 1; fi

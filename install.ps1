@@ -48,6 +48,7 @@ param(
     [string]$DesktopDir = '',
     [string]$RouterBase = '',
     [string]$RouterKey = '',
+    [string]$Mirror = '',
     [switch]$Offline,
     [switch]$SkipDesktop,
     [switch]$SkipPurge,
@@ -143,6 +144,7 @@ function Get-Asset {
         Die "offline mode: required asset missing -> $Name (looked in assets\)"
     }
     $url = "https://github.com/$script:Repo/releases/download/$script:ReleaseTag/$Name"
+    if ($Mirror) { $url = ($Mirror.TrimEnd('/') + '/' + $url) }
     if ($script:DryRun) { Write-Info "[dry-run] would download $Name"; return $null }
     Write-Info "downloading $Name ..."
     Log "download $url"
