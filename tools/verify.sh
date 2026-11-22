@@ -42,7 +42,7 @@ else warn "dsh-purge missing"; fi
 
 if [[ -x "$ROOT/node/bin/node" ]]; then pass "node $("$ROOT/node/bin/node" -v)"; else bad "node runtime missing"; fi
 
-head 'purge patches'
+section 'purge patches'
 if [[ -x "$ROOT/npm/bin/dsh-purge" ]]; then
   st="$("$ROOT/npm/bin/dsh-purge" 2>&1 | tr -d '\r' || true)"
   # ASCII-only extraction: BSD grep mangles multi-byte repetition in -o
@@ -57,7 +57,7 @@ if [[ -x "$ROOT/npm/bin/dsh-purge" ]]; then
   else warn 'purge state unreadable'; fi
 else bad 'dsh-purge shim missing'; fi
 
-head 'anti-upgrade'
+section 'anti-upgrade'
 APP="/Applications/DeepSeek Harness.app"
 if [[ -d "$APP" ]]; then
   RES="$APP/Contents/Resources"
@@ -68,13 +68,13 @@ else
   printf '  (cli mode - no desktop app)\n'
 fi
 
-head 'dsh home'
+section 'dsh home'
 for f in prompt-inject.md profiles/desktop/cordis.yml profiles/desktop/cordis.patch.yml profiles/desktop/package.json profiles/web/cordis.patch.yml; do
   [[ -f "$DSH_HOME/$f" ]] && pass "$f" || bad "missing $f"
 done
 [[ -f "$DSH_HOME/profiles/desktop/vendor/dsh-purge/package.json" ]] && pass 'purge vendored' || warn 'purge vendor missing'
 
-head 'profile composition'
+section 'profile composition'
 if [[ -x "$ROOT/npm/bin/dsh" ]]; then
   export DSH_HOME="$DSH_HOME"
   dump="$("$ROOT/npm/bin/dsh" --profile web --dump-config 2>&1 | tr -d '\r' || true)"
