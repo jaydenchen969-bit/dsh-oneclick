@@ -68,6 +68,8 @@ CACHE_DIR="$ROOT/npm-cache"
 NPM_PREFIX="$ROOT/npm"
 NODE_DIR="$ROOT/node"
 BIN_DIR="$ROOT/bin"
+APP_DIR="${DSH_APP_DIR:-$HOME/Applications}"
+APP_PATH="$APP_DIR/DeepSeek Harness.app"
 LOG_DIR="$ROOT/logs"
 BACKUP_ROOT="$ROOT/backups"
 ASSET_CACHE="$ROOT/_assets"
@@ -354,44 +356,62 @@ install_desktop() {
   [[ "$MODE" == "desktop" ]] || return 0
   step "desktop shell $PINNED_DESKTOP"
   local name; name="$(manifest "assets.desktop.$PLATFORM")"
-  [[ -n "$name" ]] || { warn "no desktop asset for $PLATFORM"; return; }
+  [[ -n "$name" ]] || { warn "no desktop asset for $PLATFORM"; return 0; }
   local dmg; dmg="$(get_asset "$name")" || return 0
-  if [[ -d "/Applications/DeepSeek Harness.app" && $FORCE -eq 0 ]]; then
-    ok "desktop app already present"; disable_update; return
+  if [[ -d "$APP_PATH" && $FORCE -eq 0 ]]; then
+    ok "desktop app already present at $APP_PATH"
+    disable_update
+    return 0
   fi
-  [[ $DRY -eq 1 ]] && { info "[dry-run] hdiutil attach $dmg"; return; }
-  local mnt="$ROOT/_mnt"; mkdir -p "$mnt"
-  hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null || die "hdiutil attach failed"
-  local app; app="$(find "$mnt" -maxdepth 1 -name '*.app' | head -1)"
-  [[ -n "$app" ]] || { hdiutil detach "$mnt" >/dev/null 2>&1; die "no .app inside dmg"; }
-  rm -rf "/Applications/DeepSeek Harness.app"
-  cp -R "$app" /Applications/
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] hdiutil attach $dmg -> $APP_PATH"; return 0; fi
+  local mnt="$ROOT/_mnt"; mkdir -p "$mnt" "$APP_DIR"
+  hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null 2>&1 || die "hdiutil attach failed"
+  local src; src="$(find "$mnt" -maxdepth 1 -name '*.app' | head -1)"
+  if [[ -z "$src" ]]; then hdiutil detach "$mnt" >/dev/null 2>&1 || true; die "no .app inside dmg"; fi
+  rm -rf "$APP_PATH"
+  cp -R "$src" "$APP_PATH"
   hdiutil detach "$mnt" >/dev/null 2>&1 || true
-  xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app" 2>/dev/null || true
-  ok "desktop app installed"
+  xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
+  ok "desktop app installed -> $APP_PATH"
   disable_update
+  return 0
 }
 
-disable_update() {
+pin_app_update() { # res dir
   # Renaming app-update.yml is not enough: the Electron shell restores it from
   # its asar on launch. Pin the feed to a dead URL and make the file read-only.
-  local res="/Applications/DeepSeek Harness.app/Contents/Resources"
+  local res="$1"
   [[ -d "$res" ]] || return 0
   local yml="$res/app-update.yml" orig="$res/app-update.yml.orig"
-  if [[ $DRY -eq 1 ]]; then info "[dry-run] pin app-update.yml to a dead feed"; return 0; fi
   if [[ ! -f "$yml" ]]; then
-    warn "no app-update.yml - app may not ship auto-update"; return 0
+    if [[ -f "$res/app-update.yml.disabled" ]]; then
+      mv -f "$res/app-update.yml.disabled" "$yml" 2>/dev/null || true
+    fi
+    if [[ ! -f "$yml" ]]; then info "no app-update.yml in $res"; return 0; fi
   fi
   if grep -q 'updates-disabled' "$yml" 2>/dev/null; then
-    ok "desktop auto-update already pinned"; return 0
+    ok "auto-update already pinned: $(basename "$(dirname "$(dirname "$res")")")"
+    return 0
   fi
   [[ -f "$orig" ]] || cp -f "$yml" "$orig" 2>/dev/null || true
   chmod 644 "$yml" 2>/dev/null || true
-  printf 'provider: generic\nurl: "http://127.0.0.1:9/updates-disabled/"\nchannel: disabled\nupdaterCacheDirName: disabled\n' > "$yml" \
-    && chmod 444 "$yml" \
-    && ok "desktop auto-update pinned to a dead feed (read-only)" \
-    || warn "could not pin app-update.yml (permission?)"
+  if printf 'provider: generic\nurl: "http://127.0.0.1:9/updates-disabled/"\nchannel: disabled\nupdaterCacheDirName: disabled\n' > "$yml" 2>/dev/null; then
+    chmod 444 "$yml" 2>/dev/null || true
+    ok "auto-update pinned to a dead feed (read-only)"
+  else
+    warn "could not pin $yml (permission?)"
+  fi
   rm -f "$res/app-update.yml.disabled" 2>/dev/null || true
+  return 0
+}
+
+disable_update() {
+  local app
+  for app in "$APP_PATH" "/Applications/DeepSeek Harness.app"; do
+    [[ -d "$app" ]] || continue
+    if [[ $DRY -eq 1 ]]; then info "[dry-run] pin updates in $app"; continue; fi
+    pin_app_update "$app/Contents/Resources"
+  done
   return 0
 }
 
@@ -422,7 +442,7 @@ write_lock() {
     "npmPrefix": "$NPM_PREFIX",
     "npmCache": "$CACHE_DIR",
     "dshHome": "$DSH_HOME",
-    "desktopDir": "/Applications/DeepSeek Harness.app"
+    "desktopDir": "$APP_PATH"
   },
   "integrity": { "dshPackageJsonSha256": "$hash" },
   "upgrades": { "desktop": "disabled", "dsh": "pinned", "purge": "pinned", "pnpm": "frozen" }
@@ -577,7 +597,7 @@ summary() {
   printf '  dsh      : %s\n' "$NPM_PREFIX/bin/dsh"
   printf '  launcher : %s\n' "$BIN_DIR/dsh-lock"
   printf '  web gui  : %s web --port 19387   (prints its token URL)\n' "$NPM_PREFIX/bin/dsh"
-  printf '  gui app  : open -a "DeepSeek Harness"\n'
+  printf '  gui app  : open "%s"\n' "$APP_PATH"
   printf '  verify   : %s\n' "$BIN_DIR/dsh-oneclick-verify"
   printf '  log      : %s\n' "$LOG"
   if ((${#WARNINGS[@]})); then

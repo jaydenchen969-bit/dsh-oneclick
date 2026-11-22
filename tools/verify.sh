@@ -58,19 +58,26 @@ if [[ -x "$ROOT/npm/bin/dsh-purge" ]]; then
 else bad 'dsh-purge shim missing'; fi
 
 section 'anti-upgrade'
-APP="/Applications/DeepSeek Harness.app"
-if [[ -d "$APP" ]]; then
+apps=("$HOME/Applications/DeepSeek Harness.app" "/Applications/DeepSeek Harness.app")
+found_app=0
+for APP in "${apps[@]}"; do
+  [[ -d "$APP" ]] || continue
+  found_app=1
   RES="$APP/Contents/Resources"
   YML="$RES/app-update.yml"
+  label="${APP%/*}"; label="${label##*/}"
   if [[ -f "$YML" ]] && grep -q 'updates-disabled' "$YML" 2>/dev/null; then
-    pass 'desktop auto-update pinned to a dead feed'
-    if [[ -w "$YML" ]]; then warn 'app-update.yml is writable again (run install.sh --force)'; fi
-  elif [[ -f "$YML" ]]; then warn 'desktop auto-update still points at a real feed (run install.sh --force)'
-  elif [[ -f "$RES/app-update.yml.disabled" ]]; then warn 'auto-update only renamed; the shell may restore it (run install.sh --force)'
-  else pass 'no auto-update feed present'; fi
-else
-  printf '  (cli mode - no desktop app)\n'
-fi
+    pass "auto-update pinned ($APP)"
+    [[ -w "$YML" ]] && warn "app-update.yml is writable again: $APP (run install.sh --force)"
+  elif [[ -f "$YML" ]]; then
+    warn "auto-update still points at a real feed: $APP (run install.sh --force)"
+  elif [[ -f "$RES/app-update.yml.disabled" ]]; then
+    warn "auto-update only renamed in $APP; the shell may restore it (run install.sh --force)"
+  else
+    pass "no auto-update feed in $APP"
+  fi
+done
+[[ $found_app -eq 0 ]] && printf '  (cli mode - no desktop app)\n'
 
 section 'dsh home'
 for f in prompt-inject.md profiles/desktop/cordis.yml profiles/desktop/cordis.patch.yml profiles/desktop/package.json profiles/web/cordis.patch.yml; do
