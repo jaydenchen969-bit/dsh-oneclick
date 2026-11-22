@@ -44,9 +44,9 @@ if [[ -x "$ROOT/node/bin/node" ]]; then pass "node $("$ROOT/node/bin/node" -v)";
 
 head 'purge patches'
 if [[ -x "$ROOT/npm/bin/dsh-purge" ]]; then
-  st="$("$ROOT/npm/bin/dsh-purge" 2>&1 || true)"
+  st="$("$ROOT/npm/bin/dsh-purge" 2>&1 | tr -d '\r' || true)"
   # ASCII-only extraction: BSD grep mangles multi-byte repetition in -o
-  ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+' | head -1)"
+  ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+' | head -1 | tr -d '\r')"
   if [[ -n "$ratio" ]]; then
     pass "purge $ratio entries applied (total includes skipped/na)"
     if printf '%s' "$st" | grep -qE '(^|[^0-9])[1-9][0-9]*[[:space:]]*待清洗'; then
@@ -77,7 +77,7 @@ done
 head 'profile composition'
 if [[ -x "$ROOT/npm/bin/dsh" ]]; then
   export DSH_HOME="$DSH_HOME"
-  dump="$("$ROOT/npm/bin/dsh" --profile web --dump-config 2>&1 || true)"
+  dump="$("$ROOT/npm/bin/dsh" --profile web --dump-config 2>&1 | tr -d '\r' || true)"
   if [[ -n "$dump" && "$dump" == *id:* ]]; then
     pass 'web profile composes'
     [[ "$dump" == *ds9700* ]] && pass 'user patch layer applied' || warn "user patch layer not visible (check $DSH_HOME/profiles/web/cordis.patch.yml)"

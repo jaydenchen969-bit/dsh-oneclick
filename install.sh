@@ -529,7 +529,7 @@ self_test() {
   export PATH="$NODE_DIR/bin:$NPM_PREFIX/bin:$PATH"
   local dsh="$NPM_PREFIX/bin/dsh"
   if [[ ! -x "$dsh" ]]; then warn "dsh shim missing"; return 0; fi
-  local v; v="$("$dsh" --version 2>&1 | tail -1)"
+  local v; v="$("$dsh" --version 2>&1 | tr -d '\r' | tail -1)"
   [[ "$v" == *"$PINNED_DSH"* ]] && ok "dsh --version -> $v" || warn "dsh --version -> $v"
 
   local check="$SCRIPT_DIR/tools/check-yaml.mjs" pkg="$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json"
@@ -547,15 +547,15 @@ self_test() {
     done
   fi
 
-  local dump; dump="$("$dsh" --profile web --dump-config 2>&1 || true)"
+  local dump; dump="$("$dsh" --profile web --dump-config 2>&1 | tr -d '\r' || true)"
   if [[ -n "$dump" && "$dump" == *id:* ]]; then
     ok "web profile composes"
     [[ "$dump" == *ds9700* ]] && ok "user patch layer applied" || warn "user patch layer not visible in dump"
   else warn "web profile dump-config failed"; fi
 
   if [[ $SKIP_PURGE -eq 0 && -x "$NPM_PREFIX/bin/dsh-purge" ]]; then
-    local st; st="$("$NPM_PREFIX/bin/dsh-purge" 2>&1 || true)"
-    local ratio; ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+' | head -1 || true)"
+    local st; st="$("$NPM_PREFIX/bin/dsh-purge" 2>&1 | tr -d '\r' || true)"
+    local ratio; ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+' | head -1 | tr -d '\r' || true)"
     [[ -n "$ratio" ]] && ok "purge $ratio" || warn "purge state unreadable"
   fi
 }
