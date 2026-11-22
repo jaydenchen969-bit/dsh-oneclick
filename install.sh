@@ -373,15 +373,26 @@ install_desktop() {
 }
 
 disable_update() {
+  # Renaming app-update.yml is not enough: the Electron shell restores it from
+  # its asar on launch. Pin the feed to a dead URL and make the file read-only.
   local res="/Applications/DeepSeek Harness.app/Contents/Resources"
   [[ -d "$res" ]] || return 0
-  if [[ -f "$res/app-update.yml" ]]; then
-    [[ $DRY -eq 1 ]] && { info "[dry-run] disable app-update.yml"; return; }
-    rm -f "$res/app-update.yml.disabled"
-    mv "$res/app-update.yml" "$res/app-update.yml.disabled" && ok "desktop auto-update disabled"
-  elif [[ -f "$res/app-update.yml.disabled" ]]; then
-    ok "desktop auto-update already disabled"
+  local yml="$res/app-update.yml" orig="$res/app-update.yml.orig"
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] pin app-update.yml to a dead feed"; return 0; fi
+  if [[ ! -f "$yml" ]]; then
+    warn "no app-update.yml - app may not ship auto-update"; return 0
   fi
+  if grep -q 'updates-disabled' "$yml" 2>/dev/null; then
+    ok "desktop auto-update already pinned"; return 0
+  fi
+  [[ -f "$orig" ]] || cp -f "$yml" "$orig" 2>/dev/null || true
+  chmod 644 "$yml" 2>/dev/null || true
+  printf 'provider: generic\nurl: "http://127.0.0.1:9/updates-disabled/"\nchannel: disabled\nupdaterCacheDirName: disabled\n' > "$yml" \
+    && chmod 444 "$yml" \
+    && ok "desktop auto-update pinned to a dead feed (read-only)" \
+    || warn "could not pin app-update.yml (permission?)"
+  rm -f "$res/app-update.yml.disabled" 2>/dev/null || true
+  return 0
 }
 
 write_lock() {

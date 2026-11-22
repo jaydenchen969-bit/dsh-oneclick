@@ -484,17 +484,36 @@ function Install-DesktopRuntime {
 
 function Disable-DesktopAutoUpdate {
     param([string]$DesktopDir)
+    # Renaming app-update.yml is not enough - the Electron shell restores it from
+    # its asar on launch. Pin the feed to a dead URL and mark the file read-only.
     $res = Join-Path $DesktopDir 'resources'
     if (-not (Test-Path $res)) { return }
     $yml = Join-Path $res 'app-update.yml'
+    $orig = Join-Path $res 'app-update.yml.orig'
     $dis = Join-Path $res 'app-update.yml.disabled'
-    if (Test-Path $yml) {
-        if ($script:DryRun) { Write-Info "[dry-run] disable $yml"; return }
-        if (Test-Path $dis) { Remove-Item $dis -Force }
-        Move-Item $yml $dis -Force
-        Write-Ok 'desktop auto-update disabled (app-update.yml -> .disabled)'
-    } elseif (Test-Path $dis) {
-        Write-Ok 'desktop auto-update already disabled'
+    if (-not (Test-Path $yml)) {
+        if (Test-Path $dis) { Move-Item $dis $yml -Force -ErrorAction SilentlyContinue }
+        if (-not (Test-Path $yml)) { Write-Warn2 'app-update.yml not found - app may not ship auto-update'; return }
+    }
+    if ($script:DryRun) { Write-Info "[dry-run] pin $yml to a dead feed"; return }
+    if ((Get-Content $yml -Raw -Encoding UTF8) -match 'updates-disabled') {
+        Write-Ok 'desktop auto-update already pinned'
+        return
+    }
+    try {
+        if (-not (Test-Path $orig)) { Copy-Item $yml $orig -Force }
+        attrib -R $yml 2>$null | Out-Null
+        @"
+provider: generic
+url: "http://127.0.0.1:9/updates-disabled/"
+channel: disabled
+updaterCacheDirName: disabled
+"@ | Set-Content -Path $yml -Encoding ASCII
+        attrib +R $yml 2>$null | Out-Null
+        Remove-Item $dis -Force -ErrorAction SilentlyContinue
+        Write-Ok 'desktop auto-update pinned to a dead feed (read-only)'
+    } catch {
+        Note-Warn "could not pin app-update.yml ($($_.Exception.Message)) - run as the desktop owner or skip"
     }
 }
 

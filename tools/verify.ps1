@@ -66,12 +66,17 @@ if ($lock -and $lock.upgrades.desktop -eq 'disabled') { Pass 'manifest records d
 $desktopDir = if ($lock -and $lock.paths.desktopDir) { $lock.paths.desktopDir } else { '' }
 if ($desktopDir) {
     $res = Join-Path $desktopDir 'resources'
-    if ((Test-Path (Join-Path $res 'app-update.yml.disabled')) -and -not (Test-Path (Join-Path $res 'app-update.yml'))) {
-        Pass 'desktop app-update.yml disabled'
-    } elseif (Test-Path (Join-Path $res 'app-update.yml')) {
-        Warn 'desktop auto-update still active (app-update.yml present)'
-    } elseif (-not (Test-Path $res)) {
+    $yml = Join-Path $res 'app-update.yml'
+    if (-not (Test-Path $res)) {
         Warn "desktop dir recorded but missing: $desktopDir"
+    } elseif ((Test-Path $yml) -and ((Get-Content $yml -Raw -Encoding UTF8) -match 'updates-disabled')) {
+        Pass 'desktop auto-update pinned to a dead feed'
+    } elseif (Test-Path $yml) {
+        Warn "desktop auto-update still points at a real feed (run install.ps1 -Force)"
+    } elseif (Test-Path (Join-Path $res 'app-update.yml.disabled')) {
+        Warn 'auto-update only renamed; the shell may restore it on launch (run install.ps1 -Force)'
+    } else {
+        Pass 'no update feed present'
     }
 } else { Write-Host '  (cli mode - no desktop shell)' -ForegroundColor DarkGray }
 

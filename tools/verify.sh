@@ -61,8 +61,12 @@ section 'anti-upgrade'
 APP="/Applications/DeepSeek Harness.app"
 if [[ -d "$APP" ]]; then
   RES="$APP/Contents/Resources"
-  if [[ -f "$RES/app-update.yml.disabled" && ! -f "$RES/app-update.yml" ]]; then pass 'desktop auto-update disabled'
-  elif [[ -f "$RES/app-update.yml" ]]; then warn 'desktop auto-update still active'
+  YML="$RES/app-update.yml"
+  if [[ -f "$YML" ]] && grep -q 'updates-disabled' "$YML" 2>/dev/null; then
+    pass 'desktop auto-update pinned to a dead feed'
+    if [[ -w "$YML" ]]; then warn 'app-update.yml is writable again (run install.sh --force)'; fi
+  elif [[ -f "$YML" ]]; then warn 'desktop auto-update still points at a real feed (run install.sh --force)'
+  elif [[ -f "$RES/app-update.yml.disabled" ]]; then warn 'auto-update only renamed; the shell may restore it (run install.sh --force)'
   else pass 'no auto-update feed present'; fi
 else
   printf '  (cli mode - no desktop app)\n'
