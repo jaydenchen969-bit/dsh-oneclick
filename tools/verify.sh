@@ -91,7 +91,7 @@ for p in "$GUI_PORT" 3080; do
 done
 if [[ -n "$found" ]]; then
   pass "listening on 127.0.0.1:$found"
-  if [[ "$found" != "$GUI_PORT" ]]; then info "hint: dsh-lock web --port $GUI_PORT pins the desktop-shell port"; fi
+  if [[ "$found" != "$GUI_PORT" ]]; then pass "hint: dsh-lock web --port $GUI_PORT pins the desktop-shell port"; fi
 else
   warn "nothing on $GUI_PORT (desktop shell) or 3080 (dsh web default); start one first"
 fi
