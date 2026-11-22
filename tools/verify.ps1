@@ -95,8 +95,14 @@ if (Test-Path $dshCmd) {
 } else { Bad 'dsh shim missing' }
 
 Head 'gui'
-$conn = Get-NetTCPConnection -LocalPort $GuiPort -State Listen -ErrorAction SilentlyContinue
-if ($conn) { Pass "something is listening on 127.0.0.1:$GuiPort" } else { Warn "nothing listening on $GuiPort (start the app first)" }
+$found = $null
+foreach ($p in @($GuiPort, 3080)) {
+    if (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue) { $found = $p; break }
+}
+if ($found) {
+    Pass "something is listening on 127.0.0.1:$found"
+    if ($found -ne $GuiPort) { Write-Host "  (dsh web default port; the desktop shell uses $GuiPort)" -ForegroundColor DarkGray }
+} else { Warn "nothing listening on $GuiPort (desktop shell) or 3080 (dsh web); start the app first" }
 
 Write-Host ''
 if ($script:issues -gt 0) { Write-Host "  RESULT: $($script:issues) error(s), $($script:warns) warning(s)" -ForegroundColor Red; exit 1 }

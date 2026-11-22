@@ -45,11 +45,15 @@ if [[ -x "$ROOT/node/bin/node" ]]; then pass "node $("$ROOT/node/bin/node" -v)";
 head 'purge patches'
 if [[ -x "$ROOT/npm/bin/dsh-purge" ]]; then
   st="$("$ROOT/npm/bin/dsh-purge" 2>&1 || true)"
-  ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+ *已清洗' | head -1)"
-  pending="$(printf '%s' "$st" | grep -oE '[0-9]+ *待清洗' | grep -oE '^[0-9]+' || true)"
+  # ASCII-only extraction: BSD grep mangles multi-byte repetition in -o
+  ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+' | head -1)"
   if [[ -n "$ratio" ]]; then
     pass "purge $ratio entries applied (total includes skipped/na)"
-    if [[ -n "$pending" && "$pending" -gt 0 ]]; then warn "$pending patches pending -> dsh-purge --apply"; else pass 'no pending patches'; fi
+    if printf '%s' "$st" | grep -qE '(^|[^0-9])[1-9][0-9]*[[:space:]]*待清洗'; then
+      warn "there are pending patches -> dsh-purge --apply"
+    else
+      pass 'no pending patches'
+    fi
   else warn 'purge state unreadable'; fi
 else bad 'dsh-purge shim missing'; fi
 
@@ -81,7 +85,16 @@ if [[ -x "$ROOT/npm/bin/dsh" ]]; then
 else bad 'dsh shim missing'; fi
 
 head gui
-if lsof -nP -iTCP:"$GUI_PORT" -sTCP:LISTEN >/dev/null 2>&1; then pass "listening on $GUI_PORT"; else warn "nothing on $GUI_PORT (start the app first)"; fi
+found=""
+for p in "$GUI_PORT" 3080; do
+  if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then found="$p"; break; fi
+done
+if [[ -n "$found" ]]; then
+  pass "listening on 127.0.0.1:$found"
+  if [[ "$found" != "$GUI_PORT" ]]; then info "hint: dsh-lock web --port $GUI_PORT pins the desktop-shell port"; fi
+else
+  warn "nothing on $GUI_PORT (desktop shell) or 3080 (dsh web default); start one first"
+fi
 
 echo
 if [[ $issues -gt 0 ]]; then printf '  RESULT: %d error(s), %d warning(s)\n' "$issues" "$warns"; exit 1

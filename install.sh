@@ -469,7 +469,7 @@ SH
 
   cat >"$BIN_DIR/dsh-web.command" <<'SH'
 #!/usr/bin/env bash
-exec "$HOME/.dsh-oneclick/bin/dsh-lock" web
+exec "$HOME/.dsh-oneclick/bin/dsh-lock" web --port 19387
 SH
   chmod +x "$BIN_DIR/dsh-web.command"
   ok "launchers -> $BIN_DIR"
@@ -555,7 +555,7 @@ self_test() {
 
   if [[ $SKIP_PURGE -eq 0 && -x "$NPM_PREFIX/bin/dsh-purge" ]]; then
     local st; st="$("$NPM_PREFIX/bin/dsh-purge" 2>&1 || true)"
-    local ratio; ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+ *已清洗' | head -1 || true)"
+    local ratio; ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+' | head -1 || true)"
     [[ -n "$ratio" ]] && ok "purge $ratio" || warn "purge state unreadable"
   fi
 }
@@ -565,7 +565,8 @@ summary() {
   printf '\n%s─── done ───────────────────────────────────────────────────────────%s\n' "$c_cyan" "$reset"
   printf '  dsh      : %s\n' "$NPM_PREFIX/bin/dsh"
   printf '  launcher : %s\n' "$BIN_DIR/dsh-lock"
-  printf '  web gui  : %s web   (http://127.0.0.1:19387)\n' "$NPM_PREFIX/bin/dsh"
+  printf '  web gui  : %s web --port 19387   (prints its token URL)\n' "$NPM_PREFIX/bin/dsh"
+  printf '  gui app  : open -a "DeepSeek Harness"\n'
   printf '  verify   : %s\n' "$BIN_DIR/dsh-oneclick-verify"
   printf '  log      : %s\n' "$LOG"
   if ((${#WARNINGS[@]})); then
