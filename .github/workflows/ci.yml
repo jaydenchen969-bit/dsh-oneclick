@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: json + manifest
+        run: |
+          node -e "
+            const fs=require('fs');
+            const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));
+            const p=m.pinned;
+            for (const k of ['dsh','dshPurge','desktop','node','pnpm','python','profile']) {
+              if(!p[k]) throw new Error('manifest.pinned.'+k+' missing');
+            }
+            for (const k of ['win32-x64','darwin-arm64','darwin-x64']) {
+              if(!m.assets.node[k]) throw new Error('node asset for '+k+' missing');
+              if(!m.assets.desktop[k]) throw new Error('desktop asset for '+k+' missing');
+            }
+            if(!m.assets.npmCache||!m.assets.purge||!m.assets.homeConfig) throw new Error('asset map incomplete');
+            console.log('manifest ok:', JSON.stringify(p));
+          "
+          node -e "JSON.parse(require('fs').readFileSync('payload/dsh-home/lock/versions.json','utf8')); console.log('versions.json ok')"
+
+      - name: payload completeness
+        run: |
+          set -e
+          for f in payload/dsh-home/prompt-inject.md \
+                   payload/dsh-home/profiles/desktop/cordis.yml \
+                   payload/dsh-home/profiles/desktop/cordis.patch.yml \
+                   payload/dsh-home/profiles/desktop/package.json \
+                   payload/dsh-home/profiles/desktop/pnpm-workspace.yaml \
+                   payload/vendor/dsh-purge/package.json \
+                   tools/gen-mcp.mjs \
+                   tools/verify.ps1 tools/verify.sh tools/uninstall.ps1 \
+                   tools/dsh-lock.ps1; do
+            test -f "$f" || { echo "missing $f"; exit 1; }
+          done
+          grep -q 'MCP_AUTO_BEGIN' payload/dsh-home/profiles/desktop/cordis.patch.yml
+          grep -q 'MCP_AUTO_END'   payload/dsh-home/profiles/desktop/cordis.patch.yml
+          echo "payload ok"
+
+      - name: purge version matches manifest
+        run: |
+          node -e "
+            const fs=require('fs');
+            const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));
+            const p=JSON.parse(fs.readFileSync('payload/vendor/dsh-purge/package.json','utf8'));
+            if(p.version!==m.pinned.dshPurge) throw new Error('purge '+p.version+' != '+m.pinned.dshPurge);
+            console.log('purge pinned at',p.version);
+          "
+
+      - name: node syntax
+        run: |
+          node --check tools/gen-mcp.mjs
+          echo "gen-mcp.mjs ok"
+
+      - name: shell syntax
+        run: |
+          bash -n install.sh
+          bash -n bootstrap.sh
+          bash -n tools/verify.sh
+          echo "shell ok"
+
+      - name: no secrets
+        run: |
+          if grep -rInE 'sk-[A-Za-z0-9]{20,}' payload/ *.md 2>/dev/null; then
+            echo "::error::possible API key committed"; exit 1
+          fi
+          echo "no obvious secrets"

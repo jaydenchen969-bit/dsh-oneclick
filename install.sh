@@ -1,0 +1,507 @@
+#!/usr/bin/env bash
+# dsh-oneclick · macOS installer
+# Pinned stack: dsh 0.2.2-rc.5 · dsh-purge 1.1.71 · node 24.21.0 · pnpm 11.7.0
+# Desktop shell 0.2.0-rc.2 is optional (-Mode desktop); the CLI + web GUI path is
+# fully offline.
+set -euo pipefail
+
+MODE="cli"
+ROOT="${HOME}/.dsh-oneclick"
+DSH_HOME="${HOME}/.dsh"
+ASSETS=""
+REPO="jaydenchen969-bit/dsh-oneclick"
+TAG="v1.0.0"
+OFFLINE=0
+FORCE=0
+DRY=0
+NOPATH=0
+SKIP_PURGE=0
+ROUTER_BASE=""
+ROUTER_KEY=""
+
+usage() {
+  cat <<'EOF'
+usage: install.sh [options]
+  --mode cli|desktop        cli = runtime + web GUI (default), desktop = also install the .app
+  --root DIR                install root (default ~/.dsh-oneclick)
+  --dsh-home DIR            dsh home (default ~/.dsh)
+  --assets DIR              local assets directory (implies --offline when no network)
+  --repo OWNER/REPO         default jaydenchen969-bit/dsh-oneclick
+  --tag TAG                 release tag (default v1.0.0)
+  --offline                 never touch the network
+  --force                   reinstall even when versions match
+  --dry-run                 print actions only
+  --no-path                 do not modify shell profiles
+  --skip-purge              install runtime only
+  --router-base URL         DSH_ROUTER_BASE
+  --router-key KEY          DS9700_API_KEY
+  -h, --help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --mode) MODE="$2"; shift 2;;
+    --root) ROOT="$2"; shift 2;;
+    --dsh-home) DSH_HOME="$2"; shift 2;;
+    --assets) ASSETS="$2"; shift 2;;
+    --repo) REPO="$2"; shift 2;;
+    --tag) TAG="$2"; shift 2;;
+    --offline) OFFLINE=1; shift;;
+    --force) FORCE=1; shift;;
+    --dry-run) DRY=1; shift;;
+    --no-path) NOPATH=1; shift;;
+    --skip-purge) SKIP_PURGE=1; shift;;
+    --router-base) ROUTER_BASE="$2"; shift 2;;
+    --router-key) ROUTER_KEY="$2"; shift 2;;
+    -h|--help) usage; exit 0;;
+    *) echo "unknown option: $1" >&2; usage; exit 2;;
+  esac
+done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CACHE_DIR="$ROOT/npm-cache"
+NPM_PREFIX="$ROOT/npm"
+NODE_DIR="$ROOT/node"
+BIN_DIR="$ROOT/bin"
+LOG_DIR="$ROOT/logs"
+BACKUP_ROOT="$ROOT/backups"
+ASSET_CACHE="$ROOT/_assets"
+LOG="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
+WARNINGS=()
+
+c_reset=$'\033[0m'; c_cyan=$'\033[36m'; c_green=$'\033[32m'; c_yellow=$'\033[33m'; c_red=$'\033[31m'; c_gray=$'\033[90m'
+step() { printf '\n%s==> %s%s\n' "$c_cyan" "$1" "$c_reset"; log "STEP $1"; }
+info() { printf '    %s\n' "$1"; }
+ok()   { printf '  %s[ok]%s %s\n' "$c_green" "$c_reset" "$1"; }
+warn() { WARNINGS+=("$1"); printf '  %s[!!]%s %s\n' "$c_yellow" "$c_reset" "$1"; log "WARN $1"; }
+die()  { printf '  %s[xx]%s %s\n' "$c_red" "$c_reset" "$1"; log "FAIL $1"; exit 1; }
+log()  { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$1" >>"$LOG" 2>/dev/null || true; }
+run()  { log "RUN $*"; if [[ $DRY -eq 1 ]]; then info "[dry-run] $*"; else "$@"; fi; }
+
+case "$(uname -m)" in
+  arm64) PLATFORM="darwin-arm64";;
+  x86_64) PLATFORM="darwin-x64";;
+  *) die "unsupported CPU: $(uname -m)";;
+esac
+
+manifest() {
+  node -e '
+    const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+    const path=process.argv[2].split(".");
+    let v=m;for(const p of path){v=v[p]}
+    process.stdout.write(String(v==null?"":v));
+  ' "$SCRIPT_DIR/manifest.json" "$1" 2>/dev/null || true
+}
+
+PINNED_DSH="$(manifest pinned.dsh)"; PINNED_DSH="${PINNED_DSH:-0.2.2-rc.5}"
+PINNED_PURGE="$(manifest pinned.dshPurge)"; PINNED_PURGE="${PINNED_PURGE:-1.1.71}"
+PINNED_NODE="$(manifest pinned.node)"; PINNED_NODE="${PINNED_NODE:-24.21.0}"
+PINNED_PNPM="$(manifest pinned.pnpm)"; PINNED_PNPM="${PINNED_PNPM:-11.7.0}"
+PINNED_DESKTOP="$(manifest pinned.desktop)"; PINNED_DESKTOP="${PINNED_DESKTOP:-0.2.0-rc.2}"
+
+mkdir -p "$ROOT" "$CACHE_DIR" "$NPM_PREFIX" "$LOG_DIR" "$BACKUP_ROOT" "$ASSET_CACHE" "$BIN_DIR"
+: >"$LOG"
+log "=== dsh-oneclick mac install $(date -u +%FT%TZ) mode=$MODE platform=$PLATFORM ==="
+
+# ── assets ───────────────────────────────────────────────────────────────────
+SUMS=""
+load_sums() {
+  local candidates=()
+  [[ -n "$ASSETS" ]] && candidates+=("$ASSETS/SHA256SUMS.txt")
+  candidates+=("$SCRIPT_DIR/assets/SHA256SUMS.txt")
+  for c in "${candidates[@]}"; do
+    if [[ -f "$c" ]]; then SUMS="$c"; break; fi
+  done
+  if [[ -z "$SUMS" && $OFFLINE -eq 0 ]]; then
+    if curl -fsSL --max-time 60 "https://github.com/$REPO/releases/download/$TAG/SHA256SUMS.txt" -o "$ASSET_CACHE/SHA256SUMS.txt" 2>/dev/null; then
+      SUMS="$ASSET_CACHE/SHA256SUMS.txt"
+    else
+      warn "SHA256SUMS.txt unavailable; downloads will not be verified"
+    fi
+  fi
+  [[ -n "$SUMS" ]] && ok "SHA256SUMS loaded"
+}
+
+get_asset() { # name [optional]
+  local name="$1" optional="${2:-}"
+  local p
+  for p in ${ASSETS:+"$ASSETS/$name"} "$SCRIPT_DIR/assets/$name" "$ASSET_CACHE/$name"; do
+    [[ -f "$p" ]] && { info "asset(local): $name"; echo "$p"; return 0; }
+  done
+  if [[ $OFFLINE -eq 1 ]]; then
+    [[ -n "$optional" ]] && { warn "offline: optional asset missing -> $name"; return 1; }
+    die "offline mode: required asset missing -> $name"
+  fi
+  local url="https://github.com/$REPO/releases/download/$TAG/$name"
+  info "downloading $name ..."
+  log "download $url"
+  if [[ $DRY -eq 1 ]]; then return 1; fi
+  curl -fL --retry 3 --connect-timeout 30 -o "$ASSET_CACHE/$name" "$url" || {
+    [[ -n "$optional" ]] && { warn "download failed (optional): $name"; return 1; }
+    die "download failed: $url"
+  }
+  if [[ -n "$SUMS" ]]; then
+    local want got
+    want="$(awk -v n="$name" '$2==n || $2=="*"n {print $1}' "$SUMS" | head -1)"
+    if [[ -n "$want" ]]; then
+      got="$(shasum -a 256 "$ASSET_CACHE/$name" | awk '{print $1}')"
+      [[ "$want" == "$got" ]] || die "sha256 mismatch for $name"
+      ok "sha256 ok: $name"
+    fi
+  fi
+  echo "$ASSET_CACHE/$name"
+}
+
+# ── steps ────────────────────────────────────────────────────────────────────
+preflight() {
+  step "preflight"
+  [[ "$(uname -s)" == "Darwin" ]] || die "macOS required"
+  info "macOS $(sw_vers -productVersion) · $PLATFORM"
+  local free
+  free=$(df -g "$HOME" | awk 'NR==2 {print $4}')
+  info "free space: ${free} GB"
+  [[ "$free" -lt 5 ]] && warn "less than 5 GB free on $HOME"
+  xcode-select -p >/dev/null 2>&1 || warn "Command Line Tools not found (only needed if a native dep must build)"
+  ok "preflight passed"
+}
+
+install_node() {
+  step "node $PINNED_NODE"
+  if [[ -x "$NODE_DIR/bin/node" ]]; then
+    local have; have="$("$NODE_DIR/bin/node" -v | sed 's/^v//')"
+    if [[ "$have" == "$PINNED_NODE" && $FORCE -eq 0 ]]; then ok "node $have already installed"; return; fi
+    info "node $have present, want $PINNED_NODE"
+  fi
+  local name; name="$(manifest "assets.node.$PLATFORM")"
+  [[ -n "$name" ]] || die "no node asset mapped for $PLATFORM"
+  local archive; archive="$(get_asset "$name")" || return 0
+  local tmp="$ROOT/_stage_node"; rm -rf "$tmp"; mkdir -p "$tmp"
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] tar -xzf $archive -C $tmp"; return; fi
+  tar -xzf "$archive" -C "$tmp" --strip-components=1
+  rm -rf "$NODE_DIR"; mv "$tmp" "$NODE_DIR"
+  local now; now="$("$NODE_DIR/bin/node" -v | sed 's/^v//')"
+  [[ "$now" == "$PINNED_NODE" ]] || die "node version mismatch: $now"
+  ok "node $now installed"
+}
+
+expand_cache() {
+  step "offline npm cache"
+  if [[ -f "$CACHE_DIR/.dsh-cache-ready" && $FORCE -eq 0 ]]; then ok "cache already expanded"; return; fi
+  local archive; archive="$(get_asset "$(manifest assets.npmCache)")" || return 0
+  [[ $DRY -eq 1 ]] && { info "[dry-run] expand $archive"; return; }
+  local tmp="$ROOT/_stage_cache"; rm -rf "$tmp"; mkdir -p "$tmp"
+  tar -xf "$archive" -C "$tmp" --strip-components=1
+  rm -rf "$CACHE_DIR"; mv "$tmp" "$CACHE_DIR"
+  date -u +%FT%TZ >"$CACHE_DIR/.dsh-cache-ready"
+  ok "cache ready"
+}
+
+npm_run() {
+  local has_offline=0
+  if [[ $OFFLINE -eq 1 ]]; then has_offline=1; fi
+  log "npm $*"
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] npm $*"; return 0; fi
+  if [[ $has_offline -eq 1 ]]; then
+    npm "$@" --prefix "$NPM_PREFIX" --cache "$CACHE_DIR" --offline --no-audit --no-fund --loglevel error \
+      || die "npm $* failed (offline cache incomplete)"
+  else
+    npm "$@" --prefix "$NPM_PREFIX" --cache "$CACHE_DIR" --no-audit --no-fund --loglevel error \
+      || npm "$@" --prefix "$NPM_PREFIX" --cache "$CACHE_DIR" --offline --no-audit --no-fund --loglevel error \
+      || die "npm $* failed"
+  fi
+}
+
+install_packages() {
+  step "dsh $PINNED_DSH / pnpm $PINNED_PNPM"
+  export PATH="$NODE_DIR/bin:$NPM_PREFIX/bin:$PATH"
+  export npm_config_cache="$CACHE_DIR"
+  export npm_config_update_notifier=false
+  local allow='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs'
+  local cur=""
+  [[ -f "$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json" ]] && \
+    cur="$(node -p "require('$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || true)"
+  if [[ "$cur" == "$PINNED_DSH" && $FORCE -eq 0 ]]; then
+    ok "dsh $cur already installed"
+  else
+    npm_run install -g "@deepseek-ai/dsh@$PINNED_DSH" "--allow-scripts=$allow"
+    ok "dsh $PINNED_DSH installed"
+  fi
+  local pv=""
+  [[ -f "$NPM_PREFIX/lib/node_modules/pnpm/package.json" ]] && \
+    pv="$(node -p "require('$NPM_PREFIX/lib/node_modules/pnpm/package.json').version" 2>/dev/null || true)"
+  if [[ "$pv" == "$PINNED_PNPM" && $FORCE -eq 0 ]]; then ok "pnpm $pv already installed"; else
+    npm_run install -g "pnpm@$PINNED_PNPM"; ok "pnpm $PINNED_PNPM installed"
+  fi
+}
+
+install_purge_pkg() {
+  [[ $SKIP_PURGE -eq 1 ]] && return 0
+  step "dsh-purge $PINNED_PURGE"
+  local cur=""
+  [[ -f "$NPM_PREFIX/lib/node_modules/dsh-purge/package.json" ]] && \
+    cur="$(node -p "require('$NPM_PREFIX/lib/node_modules/dsh-purge/package.json').version" 2>/dev/null || true)"
+  if [[ "$cur" == "$PINNED_PURGE" && $FORCE -eq 0 ]]; then ok "dsh-purge $cur already installed"; return; fi
+  local tgz; tgz="$(get_asset "$(manifest assets.purge)")" || return 0
+  npm_run install -g "$tgz"
+  ok "dsh-purge $PINNED_PURGE installed"
+}
+
+deploy_home() {
+  step "deploy dsh home"
+  local payload="$SCRIPT_DIR/payload/dsh-home"
+  [[ -d "$payload" ]] || die "payload missing: $payload"
+  if [[ -d "$DSH_HOME" ]]; then
+    local stamp dest; stamp="$(date +%Y%m%d-%H%M%S)"; dest="$BACKUP_ROOT/dsh-home-$stamp"
+    mkdir -p "$dest"
+    ( cd "$DSH_HOME" && tar -cf - --exclude cache --exclude sessions --exclude storages --exclude dsh-runtimes . ) | tar -xf - -C "$dest"
+    ok "backup dsh home -> $dest"
+  fi
+  run mkdir -p "$DSH_HOME/profiles/desktop" "$DSH_HOME/.lock"
+  run cp -f "$payload/prompt-inject.md" "$DSH_HOME/prompt-inject.md"
+  for f in cordis.yml cordis.patch.yml pnpm-workspace.yaml package.json; do
+    run cp -f "$payload/profiles/desktop/$f" "$DSH_HOME/profiles/desktop/$f"
+  done
+  if [[ -d "$SCRIPT_DIR/payload/vendor/dsh-purge" ]]; then
+    run rm -rf "$DSH_HOME/profiles/desktop/vendor/dsh-purge"
+    run mkdir -p "$DSH_HOME/profiles/desktop/vendor"
+    run cp -R "$SCRIPT_DIR/payload/vendor/dsh-purge" "$DSH_HOME/profiles/desktop/vendor/dsh-purge"
+  fi
+  [[ -f "$payload/lock/versions.json" ]] && run cp -f "$payload/lock/versions.json" "$DSH_HOME/.lock/versions.json"
+  ok "dsh home deployed -> $DSH_HOME"
+}
+
+mcp_probe() {
+  step "probe MCP servers"
+  [[ -f "$SCRIPT_DIR/tools/gen-mcp.mjs" ]] || { warn "gen-mcp.mjs missing"; return; }
+  run "$NODE_DIR/bin/node" "$SCRIPT_DIR/tools/gen-mcp.mjs" "$DSH_HOME/profiles/desktop/cordis.patch.yml" \
+    && ok "MCP block regenerated" || warn "MCP probe failed"
+}
+
+profile_deps() {
+  step "install profile dependencies"
+  local pnpm_cjs="$NPM_PREFIX/lib/node_modules/pnpm/bin/pnpm.cjs"
+  [[ -f "$pnpm_cjs" ]] || { warn "pnpm.cjs missing; skipping"; return; }
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] pnpm install"; return; fi
+  "$NODE_DIR/bin/node" "$pnpm_cjs" install --dir "$DSH_HOME/profiles/desktop" --config.confirmModulesPurge=false --reporter=append-only \
+    && ok "profile dependencies installed" || warn "pnpm install failed (purge falls back to global install)"
+}
+
+apply_purge() {
+  [[ $SKIP_PURGE -eq 1 ]] && return 0
+  step "apply purge patch set"
+  local bin="$NPM_PREFIX/bin/dsh-purge"
+  [[ -x "$bin" ]] || { warn "dsh-purge shim missing"; return; }
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] dsh-purge --apply"; return; fi
+  if "$bin" --apply >"$LOG_DIR/purge-apply.log" 2>&1; then ok "purge applied"; else warn "purge --apply exited $? (see logs/purge-apply.log)"; fi
+}
+
+install_desktop() {
+  [[ "$MODE" == "desktop" ]] || return 0
+  step "desktop shell $PINNED_DESKTOP"
+  local name; name="$(manifest "assets.desktop.$PLATFORM")"
+  [[ -n "$name" ]] || { warn "no desktop asset for $PLATFORM"; return; }
+  local dmg; dmg="$(get_asset "$name")" || return 0
+  if [[ -d "/Applications/DeepSeek Harness.app" && $FORCE -eq 0 ]]; then
+    ok "desktop app already present"; disable_update; return
+  fi
+  [[ $DRY -eq 1 ]] && { info "[dry-run] hdiutil attach $dmg"; return; }
+  local mnt="$ROOT/_mnt"; mkdir -p "$mnt"
+  hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null || die "hdiutil attach failed"
+  local app; app="$(find "$mnt" -maxdepth 1 -name '*.app' | head -1)"
+  [[ -n "$app" ]] || { hdiutil detach "$mnt" >/dev/null 2>&1; die "no .app inside dmg"; }
+  rm -rf "/Applications/DeepSeek Harness.app"
+  cp -R "$app" /Applications/
+  hdiutil detach "$mnt" >/dev/null 2>&1 || true
+  xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app" 2>/dev/null || true
+  ok "desktop app installed"
+  disable_update
+}
+
+disable_update() {
+  local res="/Applications/DeepSeek Harness.app/Contents/Resources"
+  [[ -d "$res" ]] || return 0
+  if [[ -f "$res/app-update.yml" ]]; then
+    [[ $DRY -eq 1 ]] && { info "[dry-run] disable app-update.yml"; return; }
+    rm -f "$res/app-update.yml.disabled"
+    mv "$res/app-update.yml" "$res/app-update.yml.disabled" && ok "desktop auto-update disabled"
+  elif [[ -f "$res/app-update.yml.disabled" ]]; then
+    ok "desktop auto-update already disabled"
+  fi
+}
+
+write_lock() {
+  step "pin versions"
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] write version lock"; return; fi
+  local pkg="$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json"
+  local hash=""; [[ -f "$pkg" ]] && hash="$(shasum -a 256 "$pkg" | awk '{print $1}')"
+  cat >"$DSH_HOME/.lock/versions.json" <<JSON
+{
+  "schema": 1,
+  "installer": "dsh-oneclick",
+  "release": "$(manifest release)",
+  "pinned": {
+    "dsh": "$PINNED_DSH",
+    "dshPurge": "$PINNED_PURGE",
+    "desktop": "$PINNED_DESKTOP",
+    "node": "$PINNED_NODE",
+    "pnpm": "$PINNED_PNPM",
+    "profile": "desktop"
+  },
+  "installedAt": "$(date -u +%FT%TZ)",
+  "platform": "$PLATFORM",
+  "paths": {
+    "root": "$ROOT",
+    "node": "$NODE_DIR",
+    "npmPrefix": "$NPM_PREFIX",
+    "npmCache": "$CACHE_DIR",
+    "dshHome": "$DSH_HOME",
+    "desktopDir": "/Applications/DeepSeek Harness.app"
+  },
+  "integrity": { "dshPackageJsonSha256": "$hash" },
+  "upgrades": { "desktop": "disabled", "dsh": "pinned", "purge": "pinned", "pnpm": "frozen" }
+}
+JSON
+  cat >"$DSH_HOME/.lock/PINNED.txt" <<EOF
+dsh           = $PINNED_DSH
+dsh-purge     = $PINNED_PURGE
+desktop shell = $PINNED_DESKTOP
+node          = $PINNED_NODE
+pnpm          = $PINNED_PNPM
+
+Do not run: npm i -g @deepseek-ai/dsh@latest
+Repair:     ~/.dsh-oneclick/bin/dsh-lock --repair
+Verify:     ~/.dsh-oneclick/bin/dsh-oneclick-verify
+EOF
+  ok "version lock written"
+}
+
+write_launchers() {
+  step "launchers"
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] write launchers"; return; fi
+  cat >"$BIN_DIR/dsh-lock" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DSH="$ROOT/npm/bin/dsh"
+LOCK="$HOME/.dsh/.lock/versions.json"
+[[ -x "$DSH" ]] || { echo "dsh missing - run install.sh" >&2; exit 1; }
+PKG="$ROOT/npm/lib/node_modules/@deepseek-ai/dsh/package.json"
+PINNED="$(LOCK="$LOCK" node -e 'const fs=require("fs");try{console.log(JSON.parse(fs.readFileSync(process.env.LOCK,"utf8")).pinned.dsh)}catch{console.log("0.2.2-rc.5")}' 2>/dev/null || echo 0.2.2-rc.5)"
+HAVE="$("$ROOT/node/bin/node" -p "require('$ROOT/npm/lib/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || true)"
+if [[ "${1:-}" == "--repair" ]]; then
+  echo "repairing dsh -> $PINNED (offline cache)"
+  "$ROOT/node/bin/npm" install -g --prefix "$ROOT/npm" --cache "$ROOT/npm-cache" --offline --no-audit --no-fund "@deepseek-ai/dsh@$PINNED"
+  exit $?
+fi
+if [[ "$HAVE" != "$PINNED" ]]; then
+  echo "  [!!] dsh drift: pinned=$PINNED actual=${HAVE:-none}" >&2
+  echo "       run: dsh-lock --repair" >&2
+fi
+exec "$DSH" "$@"
+SH
+  chmod +x "$BIN_DIR/dsh-lock"
+
+  cat >"$BIN_DIR/dsh-oneclick-verify" <<'SH'
+#!/usr/bin/env bash
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec bash "$ROOT/tools/verify.sh" --root "$ROOT"
+SH
+  chmod +x "$BIN_DIR/dsh-oneclick-verify"
+
+  cat >"$BIN_DIR/dsh-web.command" <<'SH'
+#!/usr/bin/env bash
+exec "$HOME/.dsh-oneclick/bin/dsh-lock" web
+SH
+  chmod +x "$BIN_DIR/dsh-web.command"
+  ok "launchers -> $BIN_DIR"
+}
+
+write_env() {
+  step "environment"
+  if [[ $NOPATH -eq 1 ]]; then info "shell profile untouched (--no-path)"; return; fi
+  local marker="# >>> dsh-oneclick >>>"
+  local block
+  block=$(cat <<EOF
+$marker
+export DSH_HOME="$DSH_HOME"
+export DSH_PROFILE="desktop"
+export DSH_ROUTER_BASE="\${DSH_ROUTER_BASE:-${ROUTER_BASE:-http://192.168.110.45:3425/v1}}"
+export PATH="$BIN_DIR:$NPM_PREFIX/bin:$NODE_DIR/bin:\$PATH"
+# <<< dsh-oneclick <<<
+EOF
+)
+  for rc in "$HOME/.zshrc" "$HOME/.bash_profile"; do
+    [[ -f "$rc" ]] || continue
+    if [[ $DRY -eq 1 ]]; then info "[dry-run] update $rc"; continue; fi
+    if grep -q "$marker" "$rc"; then
+      # replace existing block without requiring python3
+      local tmp; tmp="$(mktemp)"
+      awk -v m="$marker" '
+        $0==m {skip=1; next}
+        skip && /# <<< dsh-oneclick <<</ {skip=0; next}
+        !skip {print}
+      ' "$rc" >"$tmp"
+      printf '\n%s\n' "$block" >>"$tmp"
+      mv "$tmp" "$rc"
+    else
+      printf '\n%s\n' "$block" >>"$rc"
+    fi
+    ok "updated $rc"
+  done
+  [[ -n "$ROUTER_KEY" && $DRY -eq 0 ]] && { ok "DS9700_API_KEY kept in this shell only (export it yourself or add to ~/.zshrc)"; }
+}
+
+self_test() {
+  step "self test"
+  [[ $DRY -eq 1 ]] && { info "[dry-run] self test"; return; }
+  local dsh="$NPM_PREFIX/bin/dsh"
+  [[ -x "$dsh" ]] || { warn "dsh shim missing"; return; }
+  local v; v="$("$dsh" --version 2>&1 | tail -1)"
+  [[ "$v" == *"$PINNED_DSH"* ]] && ok "dsh --version -> $v" || warn "dsh --version -> $v"
+  if "$dsh" --profile desktop --dump-config >/dev/null 2>&1; then ok "profile composes"; else warn "dump-config failed"; fi
+  if [[ $SKIP_PURGE -eq 0 && -x "$NPM_PREFIX/bin/dsh-purge" ]]; then
+    local st; st="$("$NPM_PREFIX/bin/dsh-purge" 2>&1 || true)"
+    local applied; applied="$(printf '%s' "$st" | grep -c 'applied' || true)"
+    local rev; rev="$(printf '%s' "$st" | grep -o 'apply:[^ ]*' | head -1 || true)"
+    [[ -n "$rev" ]] && ok "purge $rev, $applied applied patches" || warn "purge state unreadable"
+  fi
+}
+
+summary() {
+  local reset=$'\033[0m'
+  printf '\n%s─── done ───────────────────────────────────────────────────────────%s\n' "$c_cyan" "$reset"
+  printf '  dsh      : %s\n' "$NPM_PREFIX/bin/dsh"
+  printf '  launcher : %s\n' "$BIN_DIR/dsh-lock"
+  printf '  web gui  : %s web   (http://127.0.0.1:19387)\n' "$NPM_PREFIX/bin/dsh"
+  printf '  verify   : %s\n' "$BIN_DIR/dsh-oneclick-verify"
+  printf '  log      : %s\n' "$LOG"
+  if ((${#WARNINGS[@]})); then
+    printf '\n  %swarnings:%s\n' "$c_yellow" "$reset"
+    for w in "${WARNINGS[@]}"; do printf '   - %s\n' "$w"; done
+  fi
+  printf '\n  open a new terminal (or: source ~/.zshrc) then run: dsh-lock web\n\n'
+}
+
+main() {
+  printf '\n%s dsh-oneclick  mode=%s  platform=%s  dryRun=%s %s\n' "$c_cyan" "$MODE" "$PLATFORM" "$DRY" "$c_reset"
+  load_sums
+  preflight
+  install_node
+  expand_cache
+  install_packages
+  install_purge_pkg
+  deploy_home
+  mcp_probe
+  profile_deps
+  apply_purge
+  install_desktop
+  write_lock
+  write_launchers
+  write_env
+  self_test
+  summary
+}
+
+main "$@"

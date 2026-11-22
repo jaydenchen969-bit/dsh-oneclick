@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "name": "dsh-oneclick",
+  "release": "1.0.0",
+  "pinned": {
+    "dsh": "0.2.2-rc.5",
+    "dshPurge": "1.1.71",
+    "desktop": "0.2.0-rc.2",
+    "node": "24.21.0",
+    "pnpm": "11.7.0",
+    "python": "3.12.14",
+    "profile": "desktop"
+  },
+  "assets": {
+    "npmCache": "dsh-npm-cache-0.2.2-rc.5.tar",
+    "node": {
+      "win32-x64": "node-v24.21.0-win-x64.zip",
+      "darwin-arm64": "node-v24.21.0-darwin-arm64.tar.gz",
+      "darwin-x64": "node-v24.21.0-darwin-x64.tar.gz"
+    },
+    "desktop": {
+      "win32-x64": "DeepSeekHarness-0.2.0-rc.2-win-x64.exe",
+      "darwin-arm64": "DeepSeekHarness-0.2.0-rc.2-mac-arm64.dmg",
+      "darwin-x64": "DeepSeekHarness-0.2.0-rc.2-mac-x64.dmg"
+    },
+    "runtime": {
+      "win32-x64": "dsh-runtime-0.2.0-rc.2-win32-x64.tar.gz"
+    },
+    "purge": "dsh-purge-1.1.71.tgz",
+    "homeConfig": "dsh-home-config-1.0.0.tar.gz"
+  },
+  "registry": "https://registry.npmmirror.com",
+  "updates": {
+    "desktop": "disabled",
+    "dsh": "pinned",
+    "purge": "pinned",
+    "pnpm": "frozen"
+  }
+}
+

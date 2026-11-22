@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "installer": "dsh-oneclick",
+  "release": "1.0.0",
+  "pinned": {
+    "dsh": "0.2.2-rc.5",
+    "dshPurge": "1.1.71",
+    "desktop": "0.2.0-rc.2",
+    "node": "24.21.0",
+    "pnpm": "11.7.0",
+    "python": "3.12.14",
+    "profile": "desktop"
+  },
+  "upgrades": {
+    "desktop": "disabled",
+    "dsh": "pinned",
+    "purge": "pinned",
+    "pnpm": "frozen"
+  },
+  "notes": [
+    "dsh and dsh-purge are pinned; run tools/verify to confirm nothing drifted.",
+    "desktop shell auto-update is disabled by renaming resources/app-update.yml.",
+    "profile dependencies are installed by pnpm with the shipped workspace file."
+  ]
+}

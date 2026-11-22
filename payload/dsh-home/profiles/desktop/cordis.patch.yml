@@ -1,0 +1,149 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# dsh-oneclick · desktop profile patch layer
+# Applied after every bundle layer. Machine-specific values are pulled from
+# environment variables with safe defaults so the same file works on a fresh
+# machine. See payload/dsh-home/lock/versions.json for the pinned versions.
+#
+# Override at runtime (installer writes these into the user environment):
+#   DSH_ROUTER_BASE   default http://192.168.110.45:3425/v1   (OpenAI-compatible router)
+#   DSH_DEFAULT_MODEL default deepseek-flash
+# ⚠ Router reachability: the default router is a LAN address. If the new machine
+#   is not on that LAN, set DSH_ROUTER_BASE (or switch provider to deepseek-account
+#   with DEEPSEEK_API_KEY).
+# ─────────────────────────────────────────────────────────────────────────────
+- id: ui-settings-account
+  name: "@deepseek-ai/dsh-client-ui-settings-account"
+  config:
+    version: 1
+    step: done
+    purpose: null
+    process: standard
+    completion: skipped
+    usage: compact
+    developerTools: false
+- id: ui-chat
+  name: "@deepseek-ai/dsh-client-ui-chat"
+  config:
+    transcriptView: standard
+    performanceUsage: compact
+- id: ui-settings
+  name: "@deepseek-ai/dsh-client-ui-settings"
+  config:
+    enabled: false
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      ds9700:
+        apiKeyEnv: DS9700_API_KEY
+        api: openai-completions
+        baseURL: !!js process.env.DSH_ROUTER_BASE ?? 'http://192.168.110.45:3425/v1'
+        models:
+          - id: group/work-hub
+            name: Auto 日常 · routing group
+            contextWindow: 512000
+            maxTokens: 131072
+          - id: group/work-coding
+            name: Auto 开发 · routing group
+            contextWindow: 512000
+            maxTokens: 128000
+          - id: group/cheap-first
+            name: Auto 省钱 · routing group
+            contextWindow: 960000
+            maxTokens: 131072
+          - id: group/chatgpt
+            name: Auto GPT · routing group
+            contextWindow: 512000
+            maxTokens: 128000
+          - id: group/security-auto
+            name: Auto 网安 · routing group
+            contextWindow: 1000000
+            maxTokens: 131072
+          - id: group/model-gemini4-neon
+            name: G4 Neon · routing group
+            contextWindow: 1048576
+          - id: group/model-gemini4-hydrogen
+            name: G4 Hydro · routing group
+            contextWindow: 1048576
+          - id: group/model-gemini4-argon
+            name: G4 Argon · routing group
+            contextWindow: 1048576
+          - id: group/model-gemini38-flash
+            name: G3.8 Flash · routing group
+            contextWindow: 1048576
+          - id: group/model-claude55-opus
+            name: Opus 5.5 · routing group
+            contextWindow: 1000000
+          - id: group/model-gpt62-astra
+            name: GPT6.2 Astra · routing group
+            contextWindow: 512000
+            maxTokens: 128000
+          - id: group/model-gpt62-sol
+            name: GPT6.2 Sol · routing group
+            contextWindow: 512000
+            maxTokens: 128000
+          - id: group/model-gpt61-terra
+            name: GPT6.1 Terra · routing group
+            contextWindow: 512000
+            maxTokens: 128000
+          - id: group/model-gpt6-luna
+            name: GPT6 Luna · routing group
+            contextWindow: 512000
+            maxTokens: 128000
+          - id: group/model-ds41-flash
+            name: DS4.1 Flash · routing group
+            contextWindow: 1000000
+            maxTokens: 128000
+          - id: group/model-kimi31-pro
+            name: Kimi 3.1 · routing group
+            contextWindow: 1000000
+            maxTokens: 32000
+          - id: group/model-glm53
+            name: GLM5.3 · routing group
+            contextWindow: 1000000
+            maxTokens: 64000
+          - id: group/model-glm53-flash
+            name: GLM5.3 Flash · routing group
+            contextWindow: 1000000
+            maxTokens: 131072
+          - id: group/model-qwen4-max
+            name: Qwen4 Max · routing group
+            contextWindow: 1000000
+          - id: group/model-qwen38-max
+            name: Qwen3.8 Max · routing group
+            contextWindow: 1000000
+            maxTokens: 64000
+          - id: group/model-qwen38-flash
+            name: Qwen3.8 Flash · routing group
+            contextWindow: 1000000
+            maxTokens: 64000
+          - id: group/model-seed21-pro
+            name: Seed 2.1 · routing group
+            contextWindow: 1000000
+            maxTokens: 64000
+          - id: group/model-hy4
+            name: HY4 · routing group
+            contextWindow: 960000
+            maxTokens: 64000
+          - id: group/hy4-flash-free
+            name: HY4 Free · routing group
+            contextWindow: 960000
+            maxTokens: 64000
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deepseek-account
+    model: !!js process.env.DSH_DEFAULT_MODEL ?? 'deepseek-flash'
+    reasoningEffort: high
+- id: ui-conversation
+  name: "@deepseek-ai/dsh-client-ui-conversation"
+  config:
+    busyEnter: steer
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MCP servers. The block between the markers below is rewritten by the
+# installer (tools/gen-mcp.mjs) after probing this machine: only entries whose
+# command/binary actually exists are emitted, so a fresh machine never boots
+# with dangling MCP paths.
+# >>> MCP_AUTO_BEGIN
+# <<< MCP_AUTO_END
