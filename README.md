@@ -171,14 +171,14 @@ Release 资产（不上仓库，走 Release）：
 
 | 资产 | 约体积 |
 |---|---|
-| `dsh-npm-cache-0.2.2-rc.5.tar` | 345 MB |
-| `node-v24.21.0-win-x64.zip` | 30 MB |
-| `node-v24.21.0-darwin-arm64.tar.gz` | 48 MB |
-| `node-v24.21.0-darwin-x64.tar.gz` | 50 MB |
+| `dsh-npm-cache-0.2.2-rc.5.tar` | 446 MB |
+| `node-v24.21.0-win-x64.zip` | 36 MB |
+| `node-v24.21.0-darwin-arm64.tar.gz` | 51 MB |
+| `node-v24.21.0-darwin-x64.tar.gz` | 52 MB |
 | `DeepSeekHarness-0.2.0-rc.2-win-x64.exe` | 276 MB |
 | `DeepSeekHarness-0.2.0-rc.2-mac-arm64.dmg` | 353 MB |
 | `DeepSeekHarness-0.2.0-rc.2-mac-x64.dmg` | 369 MB |
-| `dsh-runtime-0.2.0-rc.2-win32-x64.tar.gz` | ~200 MB |
+| `dsh-runtime-0.2.0-rc.2-win32-x64.tar.gz` | 152 MB |
 | `dsh-purge-1.1.71.tgz` | 1 MB |
 | `dsh-home-config-1.0.0.tar.gz` | 40 KB |
 | `SHA256SUMS.txt` | — |

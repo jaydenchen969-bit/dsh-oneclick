@@ -52,10 +52,12 @@ $purgeCmd = Join-Path $root 'npm\dsh-purge.cmd'
 if (Test-Path $purgeCmd) {
     $st = & $purgeCmd 2>&1 | Out-String
     $m = [regex]::Match($st, '(\d+)\s*/\s*(\d+)\s*已清洗')
+    $pending = [regex]::Match($st, '(\d+)\s*待清洗')
     if ($m.Success) {
-        $applied = $m.Groups[1].Value; $total = $m.Groups[2].Value
-        Pass "purge $applied/$total patches applied"
-        if ([int]$applied -lt [int]$total) { Warn "purge patch set incomplete -> dsh-purge --apply" }
+        Pass "purge $($m.Groups[1].Value)/$($m.Groups[2].Value) entries applied (skipped/na entries included in total)"
+        if ($pending.Success -and [int]$pending.Groups[1].Value -gt 0) {
+            Warn "$($pending.Groups[1].Value) patches pending -> dsh-purge --apply"
+        } else { Pass 'no pending patches' }
     } elseif ($st -match 'apply:(\S+)') { Pass "purge state $($Matches[1])" } else { Warn 'purge state not readable' }
 } else { Bad 'dsh-purge shim missing' }
 
@@ -83,11 +85,12 @@ if (Test-Path $vendor) { Pass 'purge vendored in profile' } else { Warn 'purge v
 Head 'profile composition'
 $dshCmd = Join-Path $root 'npm\dsh.cmd'
 if (Test-Path $dshCmd) {
+    $env:DSH_HOME = $dshHome
     $dump = & $dshCmd --profile web --dump-config 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0 -and $dump.Length -gt 200) {
         Pass 'web profile composes (dump-config ok)'
         if ($dump -match 'ds9700') { Pass 'user patch layer applied (ds9700 provider present)' }
-        else { Warn 'user patch layer not visible in dump' }
+        else { Warn "user patch layer not visible in dump (check $dshHome\profiles\web\cordis.patch.yml)" }
     } else { Bad 'dump-config failed (run: dsh --profile web --dump-config)' }
 } else { Bad 'dsh shim missing' }
 

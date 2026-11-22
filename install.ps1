@@ -143,9 +143,9 @@ function Get-Asset {
         Die "offline mode: required asset missing -> $Name (looked in assets\)"
     }
     $url = "https://github.com/$script:Repo/releases/download/$script:ReleaseTag/$Name"
+    if ($script:DryRun) { Write-Info "[dry-run] would download $Name"; return $null }
     Write-Info "downloading $Name ..."
     Log "download $url"
-    if ($script:DryRun) { return $null }
     $sw = [Diagnostics.Stopwatch]::StartNew()
     try {
         Invoke-WebRequest -Uri $url -OutFile $cached -UseBasicParsing -TimeoutSec 3600
@@ -670,11 +670,13 @@ try {
     }
     Write-Host ''
     Write-Host '  launch:' -ForegroundColor Cyan
-    if ($Mode -eq 'desktop') {
-        $exePath = Join-Path $script:DesktopDir 'DeepSeek Harness.exe'
-        Write-Host "    desktop : $exePath"
+    if ($Mode -eq 'desktop' -and $script:DesktopDir) {
+        Write-Host "    desktop : $(Join-Path $script:DesktopDir 'DeepSeek Harness.exe')"
+    } elseif ($Mode -eq 'desktop') {
+        Write-Host '    desktop : (shell not installed: -SkipDesktop or asset unavailable)'
     }
     Write-Host "    web gui : $script:NpmPrefix\dsh.cmd web   (http://127.0.0.1:19387)"
+    Write-Host "    locked  : $script:BinDir\dsh-lock.cmd web  (version-guarded launcher)"
     Write-Host "    verify  : $script:Root\tools\verify.cmd  (after first run)"
     Write-Host "    log     : $logFile"
     Write-Host ''

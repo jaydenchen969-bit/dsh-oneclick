@@ -46,11 +46,10 @@ head 'purge patches'
 if [[ -x "$ROOT/npm/bin/dsh-purge" ]]; then
   st="$("$ROOT/npm/bin/dsh-purge" 2>&1 || true)"
   ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+ *已清洗' | head -1)"
-  applied="$(printf '%s' "$ratio" | grep -oE '^[0-9]+')"
-  total="$(printf '%s' "$ratio" | grep -oE '/[0-9]+' | tr -d '/')"
+  pending="$(printf '%s' "$st" | grep -oE '[0-9]+ *待清洗' | grep -oE '^[0-9]+' || true)"
   if [[ -n "$ratio" ]]; then
-    pass "purge $ratio"
-    [[ -n "$applied" && -n "$total" && "$applied" -lt "$total" ]] && warn "patch set incomplete -> dsh-purge --apply"
+    pass "purge $ratio entries applied (total includes skipped/na)"
+    if [[ -n "$pending" && "$pending" -gt 0 ]]; then warn "$pending patches pending -> dsh-purge --apply"; else pass 'no pending patches'; fi
   else warn 'purge state unreadable'; fi
 else bad 'dsh-purge shim missing'; fi
 
@@ -73,10 +72,11 @@ done
 
 head 'profile composition'
 if [[ -x "$ROOT/npm/bin/dsh" ]]; then
+  export DSH_HOME="$DSH_HOME"
   dump="$("$ROOT/npm/bin/dsh" --profile web --dump-config 2>&1 || true)"
   if [[ -n "$dump" && "$dump" == *id:* ]]; then
     pass 'web profile composes'
-    [[ "$dump" == *ds9700* ]] && pass 'user patch layer applied' || warn 'user patch layer not visible in dump'
+    [[ "$dump" == *ds9700* ]] && pass 'user patch layer applied' || warn "user patch layer not visible (check $DSH_HOME/profiles/web/cordis.patch.yml)"
   else bad 'dump-config failed'; fi
 else bad 'dsh shim missing'; fi
 
