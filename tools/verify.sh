@@ -15,7 +15,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 issues=0; warns=0
-head() { printf '\n\033[36m%s\033[0m\n' "$1"; }
+section() { printf '\n\033[36m%s\033[0m\n' "$1"; }
 pass() { printf '  \033[32m[ok]\033[0m %s\n' "$1"; }
 warn() { warns=$((warns+1)); printf '  \033[33m[!!]\033[0m %s\n' "$1"; }
 bad()  { issues=$((issues+1)); printf '  \033[31m[xx]\033[0m %s\n' "$1"; }
@@ -27,7 +27,7 @@ if [[ -f "$LOCK" ]]; then
   [[ -n "$v" ]] && PIN_DSH="$v"
 fi
 
-head versions
+section versions
 PKG="$ROOT/npm/lib/node_modules/@deepseek-ai/dsh/package.json"
 if [[ -f "$PKG" ]]; then
   HAVE="$(node -p "require('$PKG').version" 2>/dev/null || echo unknown)"
@@ -84,7 +84,7 @@ if [[ -x "$ROOT/npm/bin/dsh" ]]; then
   else bad 'dump-config failed'; fi
 else bad 'dsh shim missing'; fi
 
-head gui
+section gui
 found=""
 for p in "$GUI_PORT" 3080; do
   if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then found="$p"; break; fi
