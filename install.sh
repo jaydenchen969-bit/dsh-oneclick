@@ -520,6 +520,9 @@ export PATH="$BIN_DIR:$NPM_PREFIX/bin:$NODE_DIR/bin:\$PATH"
 # <<< dsh-oneclick <<<
 EOF
 )
+  if [[ -n "$ROUTER_KEY" ]]; then
+    block="${block}"$'\n'"export DS9700_API_KEY=\"$ROUTER_KEY\""
+  fi
   for rc in "$HOME/.zshrc" "$HOME/.bash_profile"; do
     [[ -f "$rc" ]] || continue
     if [[ $DRY -eq 1 ]]; then info "[dry-run] update $rc"; continue; fi
@@ -539,7 +542,9 @@ EOF
     ok "updated $rc"
   done
   if [[ -n "$ROUTER_KEY" && $DRY -eq 0 ]]; then
-    ok "DS9700_API_KEY kept in this shell only (export it yourself or add to ~/.zshrc)"
+    ok "DS9700_API_KEY written into the dsh-oneclick block of your shell profile"
+  else
+    info "no router key given: export DS9700_API_KEY=... later, or re-run with --router-key"
   fi
   return 0
 }
