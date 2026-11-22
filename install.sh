@@ -195,7 +195,7 @@ install_node() {
   local archive; archive="$(get_asset "$name")" || return 0
   local tmp="$ROOT/_stage_node"; rm -rf "$tmp"; mkdir -p "$tmp"
   if [[ $DRY -eq 1 ]]; then info "[dry-run] tar -xzf $archive -C $tmp"; return; fi
-  tar -xzf "$archive" -C "$tmp" --strip-components=1
+  tar -xzf "$archive" -C "$tmp" --strip-components 1
   rm -rf "$NODE_DIR"; mv "$tmp" "$NODE_DIR"
   local now; now="$("$NODE_DIR/bin/node" -v | sed 's/^v//')"
   [[ "$now" == "$PINNED_NODE" ]] || die "node version mismatch: $now"
@@ -208,7 +208,7 @@ expand_cache() {
   local archive; archive="$(get_asset "$(manifest assets.npmCache)")" || return 0
   [[ $DRY -eq 1 ]] && { info "[dry-run] expand $archive"; return; }
   local tmp="$ROOT/_stage_cache"; rm -rf "$tmp"; mkdir -p "$tmp"
-  tar -xf "$archive" -C "$tmp" --strip-components=1
+  tar -xf "$archive" -C "$tmp" --strip-components 1
   rm -rf "$CACHE_DIR"; mv "$tmp" "$CACHE_DIR"
   date -u +%FT%TZ >"$CACHE_DIR/.dsh-cache-ready"
   ok "cache ready"
