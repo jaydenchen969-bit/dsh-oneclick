@@ -253,8 +253,9 @@ install_packages() {
   export npm_config_update_notifier=false
   local allow='@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs'
   local cur=""
-  [[ -f "$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json" ]] && \
+  if [[ -f "$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json" ]]; then
     cur="$(node -p "require('$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || true)"
+  fi
   if [[ "$cur" == "$PINNED_DSH" && $FORCE -eq 0 ]]; then
     ok "dsh $cur already installed"
   else
@@ -262,8 +263,9 @@ install_packages() {
     ok "dsh $PINNED_DSH installed"
   fi
   local pv=""
-  [[ -f "$NPM_PREFIX/lib/node_modules/pnpm/package.json" ]] && \
+  if [[ -f "$NPM_PREFIX/lib/node_modules/pnpm/package.json" ]]; then
     pv="$(node -p "require('$NPM_PREFIX/lib/node_modules/pnpm/package.json').version" 2>/dev/null || true)"
+  fi
   if [[ "$pv" == "$PINNED_PNPM" && $FORCE -eq 0 ]]; then ok "pnpm $pv already installed"; else
     if npm_run install -g "pnpm@$PINNED_PNPM"; then ok "pnpm $PINNED_PNPM installed"
     else warn "pnpm $PINNED_PNPM unavailable offline; profile deps will be skipped (purge still applies)"; fi
@@ -274,8 +276,9 @@ install_purge_pkg() {
   [[ $SKIP_PURGE -eq 1 ]] && return 0
   step "dsh-purge $PINNED_PURGE"
   local cur=""
-  [[ -f "$NPM_PREFIX/lib/node_modules/dsh-purge/package.json" ]] && \
+  if [[ -f "$NPM_PREFIX/lib/node_modules/dsh-purge/package.json" ]]; then
     cur="$(node -p "require('$NPM_PREFIX/lib/node_modules/dsh-purge/package.json').version" 2>/dev/null || true)"
+  fi
   if [[ "$cur" == "$PINNED_PURGE" && $FORCE -eq 0 ]]; then ok "dsh-purge $cur already installed"; return; fi
   local tgz; tgz="$(get_asset "$(manifest assets.purge)")" || return 0
   if npm_run install -g "$tgz"; then ok "dsh-purge $PINNED_PURGE installed"
@@ -310,7 +313,7 @@ deploy_home() {
   else
     info "cli mode: desktop profile left to the Electron app"
   fi
-  [[ -f "$payload/lock/versions.json" ]] && run cp -f "$payload/lock/versions.json" "$DSH_HOME/.lock/versions.json"
+  if [[ -f "$payload/lock/versions.json" ]]; then run cp -f "$payload/lock/versions.json" "$DSH_HOME/.lock/versions.json"; fi
   ok "dsh home deployed -> $DSH_HOME"
 }
 
@@ -385,7 +388,8 @@ write_lock() {
   step "pin versions"
   if [[ $DRY -eq 1 ]]; then info "[dry-run] write version lock"; return; fi
   local pkg="$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json"
-  local hash=""; [[ -f "$pkg" ]] && hash="$(shasum -a 256 "$pkg" | awk '{print $1}')"
+  local hash=""
+  if [[ -f "$pkg" ]]; then hash="$(shasum -a 256 "$pkg" | awk '{print $1}')"; fi
   cat >"$DSH_HOME/.lock/versions.json" <<JSON
 {
   "schema": 1,
@@ -434,6 +438,7 @@ write_launchers() {
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PATH="$ROOT/node/bin:$ROOT/npm/bin:$PATH"
 DSH="$ROOT/npm/bin/dsh"
 LOCK="$HOME/.dsh/.lock/versions.json"
 [[ -x "$DSH" ]] || { echo "dsh missing - run install.sh" >&2; exit 1; }
@@ -457,6 +462,7 @@ SH
 #!/usr/bin/env bash
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PATH="$ROOT/node/bin:$ROOT/npm/bin:$PATH"
 exec bash "$ROOT/tools/verify.sh" --root "$ROOT"
 SH
   chmod +x "$BIN_DIR/dsh-oneclick-verify"
@@ -501,14 +507,28 @@ EOF
     fi
     ok "updated $rc"
   done
-  [[ -n "$ROUTER_KEY" && $DRY -eq 0 ]] && { ok "DS9700_API_KEY kept in this shell only (export it yourself or add to ~/.zshrc)"; }
+  if [[ -n "$ROUTER_KEY" && $DRY -eq 0 ]]; then
+    ok "DS9700_API_KEY kept in this shell only (export it yourself or add to ~/.zshrc)"
+  fi
+  return 0
+}
+
+install_tools() {
+  step "install tools"
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] copy tools"; return 0; fi
+  mkdir -p "$ROOT/tools"
+  cp -R "$SCRIPT_DIR/tools/." "$ROOT/tools/" 2>/dev/null || true
+  chmod +x "$ROOT/tools/"*.sh 2>/dev/null || true
+  ok "tools -> $ROOT/tools"
+  return 0
 }
 
 self_test() {
   step "self test"
-  [[ $DRY -eq 1 ]] && { info "[dry-run] self test"; return; }
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] self test"; return 0; fi
+  export PATH="$NODE_DIR/bin:$NPM_PREFIX/bin:$PATH"
   local dsh="$NPM_PREFIX/bin/dsh"
-  [[ -x "$dsh" ]] || { warn "dsh shim missing"; return; }
+  if [[ ! -x "$dsh" ]]; then warn "dsh shim missing"; return 0; fi
   local v; v="$("$dsh" --version 2>&1 | tail -1)"
   [[ "$v" == *"$PINNED_DSH"* ]] && ok "dsh --version -> $v" || warn "dsh --version -> $v"
 
@@ -517,8 +537,9 @@ self_test() {
     local f
     for f in "$DSH_HOME/profiles/web/cordis.patch.yml" "$DSH_HOME/profiles/desktop/cordis.patch.yml" "$DSH_HOME/profiles/desktop/cordis.yml"; do
       [[ -f "$f" ]] || continue
-      "$NODE_DIR/bin/node" "$check" "$f" "$pkg" >/dev/null 2>&1
-      case $? in
+      local yrc=0
+      "$NODE_DIR/bin/node" "$check" "$f" "$pkg" >/dev/null 2>&1 || yrc=$?
+      case $yrc in
         0) ok "yaml ok: $(basename "$(dirname "$f")")/$(basename "$f")";;
         3) info "yaml check skipped (js-yaml unavailable)";;
         *) warn "yaml syntax error: $f";;
@@ -552,6 +573,7 @@ summary() {
     for w in "${WARNINGS[@]}"; do printf '   - %s\n' "$w"; done
   fi
   printf '\n  open a new terminal (or: source ~/.zshrc) then run: dsh-lock web\n\n'
+  return 0
 }
 
 main() {
@@ -568,6 +590,7 @@ main() {
   apply_purge
   install_desktop
   write_lock
+  install_tools
   write_launchers
   write_env
   self_test
