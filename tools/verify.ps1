@@ -51,12 +51,12 @@ Head 'purge patches'
 $purgeCmd = Join-Path $root 'npm\dsh-purge.cmd'
 if (Test-Path $purgeCmd) {
     $st = & $purgeCmd 2>&1 | Out-String
-    $rev = ([regex]::Match($st, 'apply:(\S+)')).Groups[1].Value
-    $applied = ([regex]::Matches($st, 'applied')).Count
-    $pending = ([regex]::Match($st, '(\d+)\s*待清洗')).Groups[1].Value
-    $pendingText = if ($pending -and [int]$pending -gt 0) { ", $pending pending" } else { '' }
-    if ($rev) { Pass "state $rev, $applied applied$pendingText" } else { Warn 'purge state not readable' }
-    if ($pending -and [int]$pending -gt 0) { Warn "$pending patches pending -> run dsh-purge --apply" }
+    $m = [regex]::Match($st, '(\d+)\s*/\s*(\d+)\s*已清洗')
+    if ($m.Success) {
+        $applied = $m.Groups[1].Value; $total = $m.Groups[2].Value
+        Pass "purge $applied/$total patches applied"
+        if ([int]$applied -lt [int]$total) { Warn "purge patch set incomplete -> dsh-purge --apply" }
+    } elseif ($st -match 'apply:(\S+)') { Pass "purge state $($Matches[1])" } else { Warn 'purge state not readable' }
 } else { Bad 'dsh-purge shim missing' }
 
 Head 'anti-upgrade'
@@ -74,7 +74,7 @@ if ($desktopDir) {
 } else { Write-Host '  (cli mode - no desktop shell)' -ForegroundColor DarkGray }
 
 Head 'dsh home'
-foreach ($f in 'prompt-inject.md', 'profiles\desktop\cordis.yml', 'profiles\desktop\cordis.patch.yml', 'profiles\desktop\package.json') {
+foreach ($f in 'prompt-inject.md', 'profiles\desktop\cordis.yml', 'profiles\desktop\cordis.patch.yml', 'profiles\desktop\package.json', 'profiles\web\cordis.patch.yml') {
     if (Test-Path (Join-Path $dshHome $f)) { Pass $f } else { Bad "missing $f" }
 }
 $vendor = Join-Path $dshHome 'profiles\desktop\vendor\dsh-purge\package.json'
@@ -83,8 +83,12 @@ if (Test-Path $vendor) { Pass 'purge vendored in profile' } else { Warn 'purge v
 Head 'profile composition'
 $dshCmd = Join-Path $root 'npm\dsh.cmd'
 if (Test-Path $dshCmd) {
-    $dump = & $dshCmd --profile desktop --dump-config 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0 -and $dump.Length -gt 200) { Pass 'dump-config ok' } else { Bad 'dump-config failed (run: dsh --profile desktop --dump-config)' }
+    $dump = & $dshCmd --profile web --dump-config 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -and $dump.Length -gt 200) {
+        Pass 'web profile composes (dump-config ok)'
+        if ($dump -match 'ds9700') { Pass 'user patch layer applied (ds9700 provider present)' }
+        else { Warn 'user patch layer not visible in dump' }
+    } else { Bad 'dump-config failed (run: dsh --profile web --dump-config)' }
 } else { Bad 'dsh shim missing' }
 
 Head 'gui'

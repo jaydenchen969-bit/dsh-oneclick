@@ -259,15 +259,23 @@ deploy_home() {
     ( cd "$DSH_HOME" && tar -cf - --exclude cache --exclude sessions --exclude storages --exclude dsh-runtimes . ) | tar -xf - -C "$dest"
     ok "backup dsh home -> $dest"
   fi
-  run mkdir -p "$DSH_HOME/profiles/desktop" "$DSH_HOME/.lock"
+  run mkdir -p "$DSH_HOME/profiles/desktop" "$DSH_HOME/profiles/web" "$DSH_HOME/.lock"
   run cp -f "$payload/prompt-inject.md" "$DSH_HOME/prompt-inject.md"
-  for f in cordis.yml cordis.patch.yml pnpm-workspace.yaml package.json; do
-    run cp -f "$payload/profiles/desktop/$f" "$DSH_HOME/profiles/desktop/$f"
-  done
-  if [[ -d "$SCRIPT_DIR/payload/vendor/dsh-purge" ]]; then
-    run rm -rf "$DSH_HOME/profiles/desktop/vendor/dsh-purge"
-    run mkdir -p "$DSH_HOME/profiles/desktop/vendor"
-    run cp -R "$SCRIPT_DIR/payload/vendor/dsh-purge" "$DSH_HOME/profiles/desktop/vendor/dsh-purge"
+  # the user patch layer always lands on the shipped `web` profile (that is what
+  # a CLI/web-GUI boot uses; "desktop" is owned by the Electron app)
+  run cp -f "$payload/profiles/desktop/cordis.patch.yml" "$DSH_HOME/profiles/web/cordis.patch.yml"
+  ok "web profile patch deployed"
+  if [[ "$MODE" == "desktop" ]]; then
+    for f in cordis.yml cordis.patch.yml pnpm-workspace.yaml package.json; do
+      run cp -f "$payload/profiles/desktop/$f" "$DSH_HOME/profiles/desktop/$f"
+    done
+    if [[ -d "$SCRIPT_DIR/payload/vendor/dsh-purge" ]]; then
+      run rm -rf "$DSH_HOME/profiles/desktop/vendor/dsh-purge"
+      run mkdir -p "$DSH_HOME/profiles/desktop/vendor"
+      run cp -R "$SCRIPT_DIR/payload/vendor/dsh-purge" "$DSH_HOME/profiles/desktop/vendor/dsh-purge"
+    fi
+  else
+    info "cli mode: desktop profile left to the Electron app"
   fi
   [[ -f "$payload/lock/versions.json" ]] && run cp -f "$payload/lock/versions.json" "$DSH_HOME/.lock/versions.json"
   ok "dsh home deployed -> $DSH_HOME"
@@ -276,12 +284,20 @@ deploy_home() {
 mcp_probe() {
   step "probe MCP servers"
   [[ -f "$SCRIPT_DIR/tools/gen-mcp.mjs" ]] || { warn "gen-mcp.mjs missing"; return; }
-  run "$NODE_DIR/bin/node" "$SCRIPT_DIR/tools/gen-mcp.mjs" "$DSH_HOME/profiles/desktop/cordis.patch.yml" \
-    && ok "MCP block regenerated" || warn "MCP probe failed"
+  local p
+  for p in "$DSH_HOME/profiles/desktop/cordis.patch.yml" "$DSH_HOME/profiles/web/cordis.patch.yml"; do
+    [[ -f "$p" ]] || continue
+    if "$NODE_DIR/bin/node" "$SCRIPT_DIR/tools/gen-mcp.mjs" "$p" >/dev/null; then ok "MCP block regenerated: $(basename "$(dirname "$p")")"
+    else warn "MCP probe failed for $p"; fi
+  done
 }
 
 profile_deps() {
   step "install profile dependencies"
+  if [[ ! -f "$DSH_HOME/profiles/desktop/package.json" ]]; then
+    info "cli mode / no profile package.json - profile deps not needed"
+    return 0
+  fi
   local pnpm_cjs="$NPM_PREFIX/lib/node_modules/pnpm/bin/pnpm.cjs"
   [[ -f "$pnpm_cjs" ]] || { warn "pnpm.cjs missing; skipping"; return; }
   if [[ $DRY -eq 1 ]]; then info "[dry-run] pnpm install"; return; fi
@@ -462,12 +478,31 @@ self_test() {
   [[ -x "$dsh" ]] || { warn "dsh shim missing"; return; }
   local v; v="$("$dsh" --version 2>&1 | tail -1)"
   [[ "$v" == *"$PINNED_DSH"* ]] && ok "dsh --version -> $v" || warn "dsh --version -> $v"
-  if "$dsh" --profile desktop --dump-config >/dev/null 2>&1; then ok "profile composes"; else warn "dump-config failed"; fi
+
+  local check="$SCRIPT_DIR/tools/check-yaml.mjs" pkg="$NPM_PREFIX/lib/node_modules/@deepseek-ai/dsh/package.json"
+  if [[ -f "$check" ]]; then
+    local f
+    for f in "$DSH_HOME/profiles/web/cordis.patch.yml" "$DSH_HOME/profiles/desktop/cordis.patch.yml" "$DSH_HOME/profiles/desktop/cordis.yml"; do
+      [[ -f "$f" ]] || continue
+      "$NODE_DIR/bin/node" "$check" "$f" "$pkg" >/dev/null 2>&1
+      case $? in
+        0) ok "yaml ok: $(basename "$(dirname "$f")")/$(basename "$f")";;
+        3) info "yaml check skipped (js-yaml unavailable)";;
+        *) warn "yaml syntax error: $f";;
+      esac
+    done
+  fi
+
+  local dump; dump="$("$dsh" --profile web --dump-config 2>&1 || true)"
+  if [[ -n "$dump" && "$dump" == *id:* ]]; then
+    ok "web profile composes"
+    [[ "$dump" == *ds9700* ]] && ok "user patch layer applied" || warn "user patch layer not visible in dump"
+  else warn "web profile dump-config failed"; fi
+
   if [[ $SKIP_PURGE -eq 0 && -x "$NPM_PREFIX/bin/dsh-purge" ]]; then
     local st; st="$("$NPM_PREFIX/bin/dsh-purge" 2>&1 || true)"
-    local applied; applied="$(printf '%s' "$st" | grep -c 'applied' || true)"
-    local rev; rev="$(printf '%s' "$st" | grep -o 'apply:[^ ]*' | head -1 || true)"
-    [[ -n "$rev" ]] && ok "purge $rev, $applied applied patches" || warn "purge state unreadable"
+    local ratio; ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+ *已清洗' | head -1 || true)"
+    [[ -n "$ratio" ]] && ok "purge $ratio" || warn "purge state unreadable"
   fi
 }
 

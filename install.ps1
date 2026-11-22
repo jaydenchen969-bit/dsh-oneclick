@@ -335,21 +335,34 @@ function Deploy-DshHome {
     Write-Ok 'prompt-inject.md deployed'
 
     $profSrc = Join-Path $payload 'profiles\desktop'
-    $profDst = Join-Path $script:DshHome 'profiles\desktop'
-    New-Item -ItemType Directory -Path $profDst -Force | Out-Null
-    foreach ($f in 'cordis.yml', 'cordis.patch.yml', 'pnpm-workspace.yaml', 'package.json') {
-        Copy-Item (Join-Path $profSrc $f) (Join-Path $profDst $f) -Force
-    }
-    Write-Ok "desktop profile files deployed -> $profDst"
+    $patchSrc = Join-Path $profSrc 'cordis.patch.yml'
 
-    # purge vendor inside the profile (portable, no absolute link:)
-    $purgeVendor = Join-Path $profDst 'vendor\dsh-purge'
-    $purgeLocal = Join-Path $PSScriptRoot 'payload\vendor\dsh-purge'
-    if (Test-Path $purgeLocal) {
-        if (Test-Path $purgeVendor) { Remove-Item $purgeVendor -Recurse -Force }
-        New-Item -ItemType Directory -Path (Split-Path -Parent $purgeVendor) -Force | Out-Null
-        Copy-Item $purgeLocal $purgeVendor -Recurse -Force
-        Write-Ok 'dsh-purge vendored into profile'
+    # Always deploy the user patch layer for the shipped `web` profile too:
+    # that is the profile a CLI/web-GUI run boots ("desktop" is Electron-owned).
+    $webDst = Join-Path $script:DshHome 'profiles\web'
+    New-Item -ItemType Directory -Path $webDst -Force | Out-Null
+    Copy-Item $patchSrc (Join-Path $webDst 'cordis.patch.yml') -Force
+    Write-Ok "web profile patch deployed -> $webDst"
+
+    if ($Mode -eq 'desktop') {
+        $profDst = Join-Path $script:DshHome 'profiles\desktop'
+        New-Item -ItemType Directory -Path $profDst -Force | Out-Null
+        foreach ($f in 'cordis.yml', 'cordis.patch.yml', 'pnpm-workspace.yaml', 'package.json') {
+            Copy-Item (Join-Path $profSrc $f) (Join-Path $profDst $f) -Force
+        }
+        Write-Ok "desktop profile files deployed -> $profDst"
+
+        # purge vendor inside the profile (portable, no absolute link:)
+        $purgeVendor = Join-Path $profDst 'vendor\dsh-purge'
+        $purgeLocal = Join-Path $PSScriptRoot 'payload\vendor\dsh-purge'
+        if (Test-Path $purgeLocal) {
+            if (Test-Path $purgeVendor) { Remove-Item $purgeVendor -Recurse -Force }
+            New-Item -ItemType Directory -Path (Split-Path -Parent $purgeVendor) -Force | Out-Null
+            Copy-Item $purgeLocal $purgeVendor -Recurse -Force
+            Write-Ok 'dsh-purge vendored into profile'
+        }
+    } else {
+        Write-Info 'cli mode: desktop profile left to the Electron app (only the web patch was deployed)'
     }
 
     $lockSrc = Join-Path $payload 'lock\versions.json'
@@ -362,19 +375,30 @@ function Deploy-DshHome {
 function Update-ProfileMcp {
     Write-Step 'probe MCP servers'
     $gen = Join-Path $PSScriptRoot 'tools\gen-mcp.mjs'
-    $patch = Join-Path $script:DshHome 'profiles\desktop\cordis.patch.yml'
     if (-not (Test-Path $gen)) { Note-Warn 'gen-mcp.mjs missing, keeping patch as-is'; return }
-    if ($script:DryRun) { Write-Info '[dry-run] node gen-mcp.mjs'; return }
+    $patches = @(
+        (Join-Path $script:DshHome 'profiles\desktop\cordis.patch.yml'),
+        (Join-Path $script:DshHome 'profiles\web\cordis.patch.yml')
+    ) | Where-Object { Test-Path $_ }
+    if (-not $patches) { Note-Warn 'no patch file found to update'; return }
+    if ($script:DryRun) { Write-Info '[dry-run] node gen-mcp.mjs (desktop + web)'; return }
     $node = Join-Path $script:NodeDir 'node.exe'
-    & $node $gen $patch
-    if ($LASTEXITCODE -ne 0) { Note-Warn "MCP probe failed (exit $LASTEXITCODE); patch left unchanged" }
-    else { Write-Ok 'MCP block regenerated for this machine' }
+    foreach ($p in $patches) {
+        & $node $gen $p
+        if ($LASTEXITCODE -ne 0) { Note-Warn "MCP probe failed for $p (exit $LASTEXITCODE)" }
+        else { Write-Ok "MCP block regenerated: $(Split-Path -Parent $p | Split-Path -Leaf)" }
+    }
     Step-Done 'mcp-probe'
 }
 
 function Install-ProfileDeps {
     Write-Step 'install profile dependencies'
     $profDst = Join-Path $script:DshHome 'profiles\desktop'
+    if (-not (Test-Path (Join-Path $profDst 'package.json'))) {
+        Write-Info 'cli mode / no profile package.json - profile deps not needed'
+        Step-Done 'profile-deps'
+        return
+    }
     $pnpmCjs = Join-Path $script:NpmPrefix 'node_modules\pnpm\bin\pnpm.cjs'
     if (-not (Test-Path $pnpmCjs)) { Note-Warn 'pnpm.cjs missing; skipping profile install'; return }
     if ($script:DryRun) { Write-Info "[dry-run] pnpm install --dir $profDst"; return }
@@ -581,17 +605,37 @@ function Invoke-SelfTest {
     $v = (& $dsh --version 2>&1 | Out-String).Trim()
     if ($v -match $script:Manifest.pinned.dsh) { Write-Ok "dsh --version -> $v" } else { Note-Warn "dsh --version -> $v (expected $($script:Manifest.pinned.dsh))" }
 
-    $dump = & $dsh --profile desktop --dump-config 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0 -and $dump.Length -gt 200) { Write-Ok 'profile composes (dump-config ok)' }
-    else { Note-Warn 'dump-config failed - check profile logs' }
+    # profile YAML syntax (dsh's own js-yaml)
+    $check = Join-Path $PSScriptRoot 'tools\check-yaml.mjs'
+    $dshPkg = Join-Path $script:NpmPrefix 'node_modules\@deepseek-ai\dsh\package.json'
+    $node = Join-Path $script:NodeDir 'node.exe'
+    if (Test-Path $check) {
+        foreach ($rel in 'profiles\web\cordis.patch.yml', 'profiles\desktop\cordis.patch.yml', 'profiles\desktop\cordis.yml') {
+            $f = Join-Path $script:DshHome $rel
+            if (-not (Test-Path $f)) { continue }
+            & $node $check $f $dshPkg | Out-Null
+            switch ($LASTEXITCODE) {
+                0 { Write-Ok "yaml ok: $rel" }
+                3 { Write-Info "yaml check skipped (js-yaml unavailable): $rel" }
+                default { Note-Warn "yaml syntax error: $rel" }
+            }
+        }
+    }
+
+    # shipped `web` profile composes and carries our patch layer
+    $dump = & $dsh --profile web --dump-config 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -and $dump.Length -gt 200) {
+        if ($dump -match 'ds9700' -or $dump -match 'DS_ROUTER') { Write-Ok 'web profile composes with the user patch layer' }
+        else { Write-Ok 'web profile composes'; Note-Warn 'user patch layer not visible in dump (check cordis.patch.yml)' }
+    } else { Note-Warn 'web profile dump-config failed' }
 
     $purge = Join-Path $script:NpmPrefix 'dsh-purge.cmd'
     if ((Test-Path $purge) -and -not $SkipPurge) {
         $st = & $purge 2>&1 | Out-String
-        $applied = ([regex]::Matches($st, 'applied')).Count
-        $rev = ([regex]::Match($st, 'apply:(\S+)')).Groups[1].Value
-        if ($rev) { Write-Ok "purge state: $rev, $applied applied patches" }
-        else { Note-Warn 'purge state unreadable' }
+        $m = [regex]::Match($st, '(\d+)\s*/\s*(\d+)\s*已清洗')
+        if ($m.Success) { Write-Ok "purge: $($m.Groups[1].Value)/$($m.Groups[2].Value) patches applied" }
+        elseif ($st -match 'apply:(\S+)') { Write-Ok "purge state: $($Matches[1])" }
+        else { Note-Warn 'purge state unreadable (run dsh-purge manually)' }
     }
     Step-Done 'self-test'
 }

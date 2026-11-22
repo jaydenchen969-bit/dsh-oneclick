@@ -92,14 +92,17 @@ curl -fsSL .../bootstrap.sh | bash -s -- --mode cli
 3. **Node 便携版**：解压到 `<Root>\node`，不碰系统 Node、不改全局 registry。
 4. **离线 npm cache**：`<Root>\npm-cache`（含 Windows + macOS 双平台二进制）。
 5. **装包**：`dsh@0.2.2-rc.5`、`pnpm@11.7.0`、`dsh-purge@1.1.71` → `<Root>\npm`。
-6. **部署 dsh home**：`prompt-inject.md`、`profiles/desktop/{cordis.yml,cordis.patch.yml,package.json}`、`vendor/dsh-purge`（不再用绝对路径 `link:`）。
-7. **MCP 探测**：`tools/gen-mcp.mjs` 扫描本机实际存在的 MCP 服务（crm-lan-ci / github-review / magpie / aoci / chrome-devtools / ida / shadcn），只把能用的写进 `cordis.patch.yml`，换机不会因为路径不存在而启动失败。
+6. **部署 dsh home**：
+   - `prompt-inject.md`（你的系统提示词）
+   - `profiles/web/cordis.patch.yml` ← 用户层补丁（模型列表 / 默认模型 / UI / MCP）。`web` 是 dsh 内置 profile，CLI 与网页版都跑它，所以这条永远部署。
+   - `profiles/desktop/*`（`-Mode desktop`）：`cordis.yml` + 补丁 + `package.json` + `vendor/dsh-purge`。注意 `desktop` profile 由 Electron 独占，CLI 无法直接启动它（`dsh` 会报 "managed exclusively by the Electron application"），这是官方设计，不是装坏了。
+7. **MCP 探测**：`tools/gen-mcp.mjs` 扫描本机实际存在的 MCP 服务（crm-lan-ci / github-review / magpie / aoci / chrome-devtools / ida / shadcn），只把能用的写进 `cordis.patch.yml`（desktop 与 web 两份都写），换机不会因为路径不存在而启动失败。
 8. **profile 依赖**：`pnpm install`（`nodeLinker: hoisted`）。
 9. **清洗**：`dsh-purge --apply`，日志在 `<Root>\logs\purge-apply.log`。
 10. **桌面壳**（`-Mode desktop`）：静默安装 → 禁用自动更新 → 预置离线 runtime（Windows）。
 11. **锁版本**：写 `~/.dsh/.lock/versions.json` + `PINNED.txt`，生成 `dsh-lock` 守卫启动器。
 12. **环境变量**：`DSH_HOME` / `DSH_PROFILE` / `DSH_ROUTER_BASE` + PATH。
-13. **自检**：`dsh --version`、`--dump-config`、purge 补丁计数。
+13. **自检**：`dsh --version`、profile YAML 语法（dsh 自带 js-yaml）、`--profile web --dump-config` 合成、purge 补丁计数。
 
 ---
 
@@ -133,6 +136,10 @@ curl -fsSL .../bootstrap.sh | bash -s -- --mode cli
 - [ ] 填 API key：`setx DS9700_API_KEY "..."`（或改 `DSH_ROUTER_BASE` 指向可达的路由）
 - [ ] 桌面壳首次启动 → 等 runtime 就绪（Windows 已预置，mac 需联网取一次）
 - [ ] `dsh-lock web` 打开 GUI，确认模型列表与现在一致
+
+> **profile 说明**：`desktop` profile 由 Electron 独占，CLI 不能启动它；CLI/网页版跑的是 dsh 内置的
+> `web` profile + 你的补丁层（`~/.dsh/profiles/web/cordis.patch.yml`）。两套配置来自同一份
+> `payload/dsh-home/profiles/desktop/cordis.patch.yml`，模型列表和 MCP 完全一致。
 
 > **路由注意**：默认 `DSH_ROUTER_BASE=http://192.168.110.45:3425/v1` 是局域网地址。
 > 新机器不在同一网段时，把它改成可达地址，或切到 `deepseek-account` +
@@ -191,8 +198,9 @@ Release 资产（不上仓库，走 Release）：
 
 | 现象 | 处理 |
 |---|---|
-| `dump-config failed` | 看 `<Root>\logs\install-*.log`；多半是 `cordis.patch.yml` 被手改坏，从仓库 `payload/` 恢复 |
-| purge 补丁数不是 82/54 | `dsh-purge --apply` 重跑，日志在 `<Root>\logs\purge-apply.log` |
+| `profile "desktop" is managed exclusively by the Electron application` | 正常：`desktop` 只能由桌面壳启动。CLI 用 `dsh-lock web`（shipped `web` profile + 你的补丁层） |
+| `dump-config failed` | 用 `dsh --profile web --dump-config` 看真实报错；再看 `<Root>\logs\install-*.log`，多半是 `cordis.patch.yml` 被手改坏，从仓库 `payload/` 恢复 |
+| purge 补丁数不是 82 | `dsh-purge --apply` 重跑，日志在 `<Root>\logs\purge-apply.log` |
 | GUI 起不来 | `dsh-lock web --help` 看参数；端口占用查 `Get-NetTCPConnection -LocalPort 19387` |
 | 模型列表空 | `DSH_ROUTER_BASE` 不可达；先 `curl $DSH_ROUTER_BASE/models` |
 | 桌面壳又要更新 | 说明 `app-update.yml.disabled` 被还原，重跑 `install.cmd -Force` |

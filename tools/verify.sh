@@ -45,11 +45,13 @@ if [[ -x "$ROOT/node/bin/node" ]]; then pass "node $("$ROOT/node/bin/node" -v)";
 head 'purge patches'
 if [[ -x "$ROOT/npm/bin/dsh-purge" ]]; then
   st="$("$ROOT/npm/bin/dsh-purge" 2>&1 || true)"
-  rev="$(printf '%s' "$st" | grep -o 'apply:[^ ]*' | head -1)"
-  applied="$(printf '%s' "$st" | grep -c 'applied' || true)"
-  pending="$(printf '%s' "$st" | grep -o '[0-9]\+ *待清洗' | grep -o '^[0-9]\+' || true)"
-  [[ -n "$rev" ]] && pass "state $rev, $applied applied" || warn 'purge state unreadable'
-  [[ -n "$pending" && "$pending" -gt 0 ]] && warn "$pending patches pending -> dsh-purge --apply"
+  ratio="$(printf '%s' "$st" | grep -oE '[0-9]+/[0-9]+ *已清洗' | head -1)"
+  applied="$(printf '%s' "$ratio" | grep -oE '^[0-9]+')"
+  total="$(printf '%s' "$ratio" | grep -oE '/[0-9]+' | tr -d '/')"
+  if [[ -n "$ratio" ]]; then
+    pass "purge $ratio"
+    [[ -n "$applied" && -n "$total" && "$applied" -lt "$total" ]] && warn "patch set incomplete -> dsh-purge --apply"
+  else warn 'purge state unreadable'; fi
 else bad 'dsh-purge shim missing'; fi
 
 head 'anti-upgrade'
@@ -64,14 +66,18 @@ else
 fi
 
 head 'dsh home'
-for f in prompt-inject.md profiles/desktop/cordis.yml profiles/desktop/cordis.patch.yml profiles/desktop/package.json; do
+for f in prompt-inject.md profiles/desktop/cordis.yml profiles/desktop/cordis.patch.yml profiles/desktop/package.json profiles/web/cordis.patch.yml; do
   [[ -f "$DSH_HOME/$f" ]] && pass "$f" || bad "missing $f"
 done
 [[ -f "$DSH_HOME/profiles/desktop/vendor/dsh-purge/package.json" ]] && pass 'purge vendored' || warn 'purge vendor missing'
 
 head 'profile composition'
 if [[ -x "$ROOT/npm/bin/dsh" ]]; then
-  if "$ROOT/npm/bin/dsh" --profile desktop --dump-config >/dev/null 2>&1; then pass 'dump-config ok'; else bad 'dump-config failed'; fi
+  dump="$("$ROOT/npm/bin/dsh" --profile web --dump-config 2>&1 || true)"
+  if [[ -n "$dump" && "$dump" == *id:* ]]; then
+    pass 'web profile composes'
+    [[ "$dump" == *ds9700* ]] && pass 'user patch layer applied' || warn 'user patch layer not visible in dump'
+  else bad 'dump-config failed'; fi
 else bad 'dsh shim missing'; fi
 
 head gui
