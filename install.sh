@@ -86,12 +86,24 @@ case "$(uname -m)" in
 esac
 
 manifest() {
-  node -e '
-    const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
-    const path=process.argv[2].split(".");
-    let v=m;for(const p of path){v=v[p]}
-    process.stdout.write(String(v==null?"":v));
-  ' "$SCRIPT_DIR/manifest.json" "$1" 2>/dev/null || true
+  # NOTE: on a fresh Mac there is no node yet, so python3 comes first and node
+  # is only the fallback. Getting this wrong breaks the very first step of the
+  # install ("no node asset mapped for darwin-arm64").
+  local key="$1" file="$SCRIPT_DIR/manifest.json" val=""
+  if command -v python3 >/dev/null 2>&1; then
+    val="$(python3 - "$file" "$key" <<'PY' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1]))
+for k in sys.argv[2].split('.'):
+    d = d[k]
+sys.stdout.write('' if d is None else str(d))
+PY
+)"
+  fi
+  if [[ -z "$val" ]] && command -v node >/dev/null 2>&1; then
+    val="$(node -e 'const fs=require("fs");let d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));for(const k of process.argv[2].split("."))d=d[k];process.stdout.write(d==null?"":String(d))' "$file" "$key" 2>/dev/null || true)"
+  fi
+  printf '%s' "$val"
 }
 
 PINNED_DSH="$(manifest pinned.dsh)"; PINNED_DSH="${PINNED_DSH:-0.2.2-rc.5}"
