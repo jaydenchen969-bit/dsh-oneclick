@@ -238,7 +238,7 @@ function Expand-NpmCache {
 
 function Invoke-Npm {
     param([string[]]$NpmArgs, [switch]$AllowOnlineFallback)
-    if ($script:DryRun) { Write-Info "[dry-run] npm $($NpmArgs -join ' ')"; return 0 }
+    if ($script:DryRun) { Write-Info "[dry-run] npm $($NpmArgs -join ' ')"; return }
     $npm = Join-Path $script:NodeDir 'npm.cmd'
     if (-not (Test-Path $npm)) { Die "npm.cmd missing at $npm" }
     $env:npm_config_cache = $script:CacheDir
@@ -249,7 +249,7 @@ function Invoke-Npm {
     $base = @('--prefix', $script:NpmPrefix, '--cache', $script:CacheDir, '--no-audit', '--no-fund', '--loglevel', 'error')
     $cmdline = @($NpmArgs) + $base
     Log ("npm " + ($NpmArgs -join ' '))
-    if ($script:DryRun) { Write-Info "[dry-run] npm $($cmdline -join ' ')"; return 0 }
+    if ($script:DryRun) { Write-Info "[dry-run] npm $($cmdline -join ' ')"; return }
     $offline = @()
     if ($script:Offline) { $offline = @('--offline') }
     & $npm @cmdline @offline
@@ -261,7 +261,7 @@ function Invoke-Npm {
         $code = $LASTEXITCODE
     }
     if ($code -ne 0) { Die "npm exited $code" }
-    return $code
+    return
 }
 
 # ─────────────────────────────── dsh ─────────────────────────────────────────
@@ -295,9 +295,14 @@ function Install-Pnpm {
     $pkgDir = Join-Path $script:NpmPrefix 'node_modules\pnpm'
     $have = Get-InstalledVersion $pkgDir
     if ($have -eq $want -and -not $script:Force) { Write-Ok "pnpm $have already installed"; Step-Done 'pnpm'; return }
-    Invoke-Npm -NpmArgs @('install', '-g', "pnpm@$want") -AllowOnlineFallback
-    Write-Ok "pnpm $want installed"
-    Step-Done 'pnpm'
+    try {
+        Invoke-Npm -NpmArgs @('install', '-g', "pnpm@$want") -AllowOnlineFallback
+        Write-Ok "pnpm $want installed"
+        Step-Done 'pnpm'
+    } catch {
+        Note-Warn "pnpm $want unavailable (offline cache miss?); profile dependency step will be skipped - purge still applies from the global install"
+        Step-Done 'pnpm-skipped'
+    }
 }
 
 function Install-Purge {

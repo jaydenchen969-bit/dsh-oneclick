@@ -204,12 +204,13 @@ npm_run() {
   if [[ $DRY -eq 1 ]]; then info "[dry-run] npm $*"; return 0; fi
   if [[ $has_offline -eq 1 ]]; then
     npm "$@" --prefix "$NPM_PREFIX" --cache "$CACHE_DIR" --offline --no-audit --no-fund --loglevel error \
-      || die "npm $* failed (offline cache incomplete)"
+      || { warn "npm $* failed (offline cache miss)"; return 1; }
   else
     npm "$@" --prefix "$NPM_PREFIX" --cache "$CACHE_DIR" --no-audit --no-fund --loglevel error \
       || npm "$@" --prefix "$NPM_PREFIX" --cache "$CACHE_DIR" --offline --no-audit --no-fund --loglevel error \
-      || die "npm $* failed"
+      || { warn "npm $* failed"; return 1; }
   fi
+  return 0
 }
 
 install_packages() {
@@ -224,14 +225,15 @@ install_packages() {
   if [[ "$cur" == "$PINNED_DSH" && $FORCE -eq 0 ]]; then
     ok "dsh $cur already installed"
   else
-    npm_run install -g "@deepseek-ai/dsh@$PINNED_DSH" "--allow-scripts=$allow"
+    npm_run install -g "@deepseek-ai/dsh@$PINNED_DSH" "--allow-scripts=$allow" || die "dsh install failed (offline cache incomplete)"
     ok "dsh $PINNED_DSH installed"
   fi
   local pv=""
   [[ -f "$NPM_PREFIX/lib/node_modules/pnpm/package.json" ]] && \
     pv="$(node -p "require('$NPM_PREFIX/lib/node_modules/pnpm/package.json').version" 2>/dev/null || true)"
   if [[ "$pv" == "$PINNED_PNPM" && $FORCE -eq 0 ]]; then ok "pnpm $pv already installed"; else
-    npm_run install -g "pnpm@$PINNED_PNPM"; ok "pnpm $PINNED_PNPM installed"
+    if npm_run install -g "pnpm@$PINNED_PNPM"; then ok "pnpm $PINNED_PNPM installed"
+    else warn "pnpm $PINNED_PNPM unavailable offline; profile deps will be skipped (purge still applies)"; fi
   fi
 }
 
@@ -243,8 +245,8 @@ install_purge_pkg() {
     cur="$(node -p "require('$NPM_PREFIX/lib/node_modules/dsh-purge/package.json').version" 2>/dev/null || true)"
   if [[ "$cur" == "$PINNED_PURGE" && $FORCE -eq 0 ]]; then ok "dsh-purge $cur already installed"; return; fi
   local tgz; tgz="$(get_asset "$(manifest assets.purge)")" || return 0
-  npm_run install -g "$tgz"
-  ok "dsh-purge $PINNED_PURGE installed"
+  if npm_run install -g "$tgz"; then ok "dsh-purge $PINNED_PURGE installed"
+  else warn "dsh-purge install failed; copy payload/vendor/dsh-purge manually if needed"; fi
 }
 
 deploy_home() {

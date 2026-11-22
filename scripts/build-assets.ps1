@@ -175,8 +175,12 @@ if ($Verify) {
         "--allow-scripts=@deepseek-ai/dsh-subprocess-local,koffi,node-pty,@google/genai,protobufjs" `
         "@deepseek-ai/dsh@$($manifest.pinned.dsh)"
     if ($LASTEXITCODE -ne 0) { throw "offline install failed with shipped node (exit $LASTEXITCODE)" }
+    & $npm install -g --prefix $prefix --cache $cacheStage --offline --no-audit --no-fund --loglevel error "pnpm@$($manifest.pinned.pnpm)"
+    if ($LASTEXITCODE -ne 0) { throw 'offline pnpm install failed (cache miss)' }
+    & $npm install -g --prefix $prefix --cache $cacheStage --offline --no-audit --no-fund --loglevel error (Join-Path $Dist $manifest.assets.purge)
+    if ($LASTEXITCODE -ne 0) { throw 'offline dsh-purge install failed' }
     $v = & (Join-Path $prefix 'dsh.cmd') --version
-    Ok "shipped node $(& (Join-Path $nodeRoot 'node.exe') -v) -> dsh $v (offline)"
+    Ok "shipped node $(& (Join-Path $nodeRoot 'node.exe') -v) -> dsh $v + pnpm + purge (all offline)"
     Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 }
 
