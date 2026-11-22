@@ -75,11 +75,11 @@ LOG="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
 WARNINGS=()
 
 c_reset=$'\033[0m'; c_cyan=$'\033[36m'; c_green=$'\033[32m'; c_yellow=$'\033[33m'; c_red=$'\033[31m'; c_gray=$'\033[90m'
-step() { printf '\n%s==> %s%s\n' "$c_cyan" "$1" "$c_reset"; log "STEP $1"; }
-info() { printf '    %s\n' "$1"; }
-ok()   { printf '  %s[ok]%s %s\n' "$c_green" "$c_reset" "$1"; }
-warn() { WARNINGS+=("$1"); printf '  %s[!!]%s %s\n' "$c_yellow" "$c_reset" "$1"; log "WARN $1"; }
-die()  { printf '  %s[xx]%s %s\n' "$c_red" "$c_reset" "$1"; log "FAIL $1"; exit 1; }
+step() { printf '\n%s==> %s%s\n' "$c_cyan" "$1" "$c_reset" >&2; log "STEP $1"; }
+info() { printf '    %s\n' "$1" >&2; }
+ok()   { printf '  %s[ok]%s %s\n' "$c_green" "$c_reset" "$1" >&2; }
+warn() { WARNINGS+=("$1"); printf '  %s[!!]%s %s\n' "$c_yellow" "$c_reset" "$1" >&2; log "WARN $1"; }
+die()  { printf '  %s[xx]%s %s\n' "$c_red" "$c_reset" "$1" >&2; log "FAIL $1"; exit 1; }
 log()  { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$1" >>"$LOG" 2>/dev/null || true; }
 run()  { log "RUN $*"; if [[ $DRY -eq 1 ]]; then info "[dry-run] $*"; else "$@"; fi; }
 
@@ -139,34 +139,50 @@ load_sums() {
   [[ -n "$SUMS" ]] && ok "SHA256SUMS loaded"
 }
 
-get_asset() { # name [optional]
+sha_state() { # file name -> 0 ok · 1 mismatch · 2 unchecked
+  local file="$1" name="$2" want got
+  [[ -z "$SUMS" ]] && return 2
+  want="$(awk -v n="$name" '$2==n || $2=="*"n {print $1}' "$SUMS" | head -1)"
+  [[ -z "$want" ]] && return 2
+  got="$(shasum -a 256 "$file" | awk '{print $1}')"
+  [[ "$want" == "$got" ]] && return 0
+  return 1
+}
+
+get_asset() { # name [optional] -> prints the asset path on stdout, chatter on stderr
   local name="$1" optional="${2:-}"
   local p
   for p in ${ASSETS:+"$ASSETS/$name"} "$SCRIPT_DIR/assets/$name" "$ASSET_CACHE/$name"; do
-    [[ -f "$p" ]] && { info "asset(local): $name"; echo "$p"; return 0; }
+    [[ -f "$p" ]] || continue
+    sha_state "$p" "$name"
+    case $? in
+      0) ok "sha256 ok: $name" ;;
+      1) warn "sha256 MISMATCH for local copy of $name - skipping $p"; continue ;;
+      2) : ;; # no checksum available
+    esac
+    info "asset(local): $p"
+    echo "$p"
+    return 0
   done
   if [[ $OFFLINE -eq 1 ]]; then
     [[ -n "$optional" ]] && { warn "offline: optional asset missing -> $name"; return 1; }
-    die "offline mode: required asset missing -> $name"
+    die "offline mode: required asset missing -> $name (looked in ${ASSETS:-assets/})"
   fi
   local url="https://github.com/$REPO/releases/download/$TAG/$name"
   if [[ -n "$MIRROR" ]]; then url="${MIRROR%/}/$url"; fi
+  if [[ $DRY -eq 1 ]]; then info "[dry-run] would download $name"; return 1; fi
   info "downloading $name ..."
   log "download $url"
-  if [[ $DRY -eq 1 ]]; then return 1; fi
   curl -fL --retry 3 --connect-timeout 30 -o "$ASSET_CACHE/$name" "$url" || {
     [[ -n "$optional" ]] && { warn "download failed (optional): $name"; return 1; }
     die "download failed: $url"
   }
-  if [[ -n "$SUMS" ]]; then
-    local want got
-    want="$(awk -v n="$name" '$2==n || $2=="*"n {print $1}' "$SUMS" | head -1)"
-    if [[ -n "$want" ]]; then
-      got="$(shasum -a 256 "$ASSET_CACHE/$name" | awk '{print $1}')"
-      [[ "$want" == "$got" ]] || die "sha256 mismatch for $name"
-      ok "sha256 ok: $name"
-    fi
-  fi
+  local rc=0
+  sha_state "$ASSET_CACHE/$name" "$name" || rc=$?
+  case $rc in
+    0) ok "sha256 ok: $name" ;;
+    1) die "sha256 mismatch for $name (download corrupted, retry or use --mirror)" ;;
+  esac
   echo "$ASSET_CACHE/$name"
 }
 
